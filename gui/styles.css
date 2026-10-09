@@ -110,3 +110,7 @@ button {
     background-color: #0f0f0f69;
   }
 }
+
+#results { list-style: none; padding: 0; text-align: left; font-family: monospace; }
+#results li.pass { color: #1a7f37; }
+#results li.fail { color: #cf222e; font-weight: bold; }
