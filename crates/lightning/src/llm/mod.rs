@@ -13,8 +13,10 @@ use crate::turn::Turn;
 
 // pub mod openai;  // stale draft, rewritten in a later task
 mod fake;
+pub mod gemini;
 
 pub use fake::FakeLlm;
+pub use gemini::GeminiClient;
 
 #[derive(Debug, Clone)]
 pub struct LlmRequest {
@@ -31,6 +33,16 @@ pub struct LlmResponse {
     pub usage: Usage,
     pub finish: FinishReason,
     pub latency_ms: u64,
+    /// Full request/response bodies, present only when the adapter was asked to
+    /// capture them (debug logging).
+    pub exchange: Option<Exchange>,
+}
+
+/// Provider request and response bodies for one call.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Exchange {
+    pub request: serde_json::Value,
+    pub response: serde_json::Value,
 }
 
 /// Token counts. Every field is optional because providers differ and the Gemini

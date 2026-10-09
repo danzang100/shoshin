@@ -34,7 +34,7 @@ impl FakeLlm {
 }
 
 fn response(turn: Turn, finish: FinishReason) -> LlmResponse {
-    LlmResponse { turn, usage: Usage::default(), finish, latency_ms: 0 }
+    LlmResponse { turn, usage: Usage::default(), finish, latency_ms: 0, exchange: None }
 }
 
 impl LlmClient for FakeLlm {
