@@ -51,16 +51,16 @@ impl fmt::Display for ToolError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ToolError::NotFound {path} => {
-                write!(f, "The file path: {path} is not found")
+                write!(f, "Not found: {path}. Use list_dir to check the path.")
             }
             ToolError::PathOutsideProject { path } => {
-                write!(f, "The file path: {path} is outside the working directory. You do not have access to this")
+                write!(f, "Path {path} is outside the workspace. Only paths inside the workspace are allowed.")
             }
             ToolError::Io { message } => {
                 write!(f, "I/O error occurred: {message}")
             }
             ToolError::InvalidArguments { message } => {
-                write!(f, "Invalid tool arguments or tool name used: {message}")
+                write!(f, "Invalid tool arguments: {message}")
             }
             ToolError::Other(err) => {
                 write!(f, "Some error occurred: {}", err)

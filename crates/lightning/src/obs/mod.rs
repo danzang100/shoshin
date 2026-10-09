@@ -4,7 +4,7 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use chrono::{SecondsFormat, Utc};
 
@@ -107,6 +107,23 @@ pub trait EventSink: Send + Sync {
     }
 }
 
+/// Keeps events in memory. Used by tests and by anything that wants to look at a
+/// live session (the GUI later). Clones share the same buffer.
+#[derive(Clone, Default)]
+pub struct MemorySink(Arc<Mutex<Vec<Event>>>);
+
+impl MemorySink {
+    pub fn events(&self) -> Vec<Event> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+}
+
+impl EventSink for MemorySink {
+    fn emit(&self, event: &Event) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).push(event.clone());
+    }
+}
+
 struct Counters {
     seq: u64,
     span: u64,
@@ -176,21 +193,11 @@ impl Recorder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-
-    struct Collect(Arc<Mutex<Vec<Event>>>);
-
-    impl EventSink for Collect {
-        fn emit(&self, event: &Event) {
-            self.0.lock().unwrap().push(event.clone());
-        }
-    }
-
-    fn recorder(secret: &str) -> (Recorder, Arc<Mutex<Vec<Event>>>) {
-        let store = Arc::new(Mutex::new(Vec::new()));
-        let sinks: Vec<Box<dyn EventSink>> = vec![Box::new(Collect(store.clone()))];
+    fn recorder(secret: &str) -> (Recorder, MemorySink) {
+        let sink = MemorySink::default();
+        let sinks: Vec<Box<dyn EventSink>> = vec![Box::new(sink.clone())];
         let rec = Recorder::new(SessionId::from("sess"), Redactor::new([secret.to_string()]), sinks);
-        (rec, store)
+        (rec, sink)
     }
 
     #[test]
@@ -202,16 +209,16 @@ mod tests {
         rec.emit(EventKind::StepStarted { step: 1 }, Some(&a), None);
         rec.emit(EventKind::StepFinished { step: 1, duration_ms: 1 }, Some(&a), None);
         rec.emit(EventKind::StepStarted { step: 2 }, Some(&b), None);
-        let seqs: Vec<u64> = store.lock().unwrap().iter().map(|e| e.seq).collect();
+        let seqs: Vec<u64> = store.events().iter().map(|e| e.seq).collect();
         assert_eq!(seqs, vec![1, 2, 3]);
-        assert!(store.lock().unwrap().iter().all(|e| e.session_id == "sess" && e.v == SCHEMA_VERSION));
+        assert!(store.events().iter().all(|e| e.session_id == "sess" && e.v == SCHEMA_VERSION));
     }
 
     #[test]
     fn secrets_never_reach_sinks() {
         let (rec, store) = recorder("sk-secret-123456");
         rec.emit(EventKind::UserMessage { text: "use sk-secret-123456 please".into() }, None, None);
-        let dump = serde_json::to_string(&*store.lock().unwrap()).unwrap();
+        let dump = serde_json::to_string(&store.events()).unwrap();
         assert!(!dump.contains("sk-secret-123456"));
         assert!(dump.contains("[REDACTED]"));
     }
