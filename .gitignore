@@ -3,3 +3,5 @@ target/
 .lightning/
 
 .env
+# Draft specs (not committed yet)
+docs/specs/
