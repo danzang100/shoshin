@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use chrono::{SecondsFormat, Utc};
 
 pub mod event;
+pub mod inspect;
 pub mod jsonl;
 pub mod redact;
 pub mod summary;
