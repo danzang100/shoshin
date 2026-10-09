@@ -2,9 +2,6 @@ use serde::Serialize;
 use strum::Display;
 use reqwest;
 
-use crate::tools::registry::ToolSpec;
-
-pub mod gemini;
 // pub mod openai;
 
 #[derive(Debug, Display)]
@@ -38,25 +35,3 @@ pub enum LLMResponse {
     Text(String),
     ToolCall { id: String, name: String, arguments: serde_json::Value}
 }
-
-pub struct LLMClient {
-    http: reqwest::Client,
-    base_url: String,
-    model: String
-}
-
-// impl LLMClient {
-//     pub fn new(base_url: String, model: String) -> Self {
-//         LLMClient { http: reqwest::Client::new(), base_url, model }
-//     }
-
-//     pub fn from_env() -> Self {
-//         LLMClient { http: (), base_url: (), model: () }
-//     }
-
-//     pub async fn chat(&self, messages: &[ChatMessage], tools: &[ToolSpec]) -> Result<LLMResponse, LLMError> {
-//         response = self.http.post(url).json(&request).send().await()?;
-
-//     }
-// }
-//
