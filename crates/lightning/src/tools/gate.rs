@@ -3,22 +3,13 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::obs::preview;
 use crate::tools::registry::ToolKind;
 use crate::turn::ToolUse;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PermissionMode {
-    /// Ask the user for each state-changing call.
-    #[default]
-    Ask,
-    Allow,
-    Deny,
-}
+pub use lightning_protocol::dto::PermissionMode;
 
 /// What the user is asked to approve.
 #[derive(Debug, Clone, PartialEq, Eq)]

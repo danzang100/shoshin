@@ -68,6 +68,12 @@ impl SessionDir {
     pub fn create(home: &Path, id: &SessionId) -> io::Result<Self> {
         let dir = Self::sessions_root(home).join(id.as_str());
         fs::create_dir_all(&dir)?;
+        // Logs must not end up in the user's repository.
+        let ignore = home.join(".gitignore");
+        if !ignore.exists() {
+            fs::write(&ignore, "*
+")?;
+        }
         Ok(SessionDir { dir })
     }
 
@@ -241,6 +247,8 @@ mod tests {
         assert!(dir.path().ends_with("sessions/20261010T000000Z-abcd") || dir.path().ends_with("sessions\\20261010T000000Z-abcd"));
         assert!(dir.events_path().ends_with("events.jsonl"));
         assert!(SessionDir::open(&home, "20261010T000000Z-abcd").is_ok());
+        assert_eq!(fs::read_to_string(home.join(".gitignore")).unwrap(), "*
+");
         assert!(SessionDir::open(&home, "missing").is_err());
         fs::remove_dir_all(home).ok();
     }

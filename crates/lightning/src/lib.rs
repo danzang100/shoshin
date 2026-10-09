@@ -1,6 +1,7 @@
 pub mod cancel;
 pub mod cli;
 pub mod config;
+pub mod host;
 pub mod llm;
 pub mod obs;
 pub mod prompt;
