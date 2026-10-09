@@ -7,6 +7,8 @@ use crate::turn::ErrorClass;
 pub enum ToolError {
     NotFound{path: String},
     PathOutsideProject{path: String},
+    /// Inside the workspace but off limits (secrets, harness logs).
+    Blocked{path: String},
     InvalidArguments{message: String},
     //ExecutionFailed{command: String, exit_code: i32, stderr: String},
     //Timeout{command: String, duration: i32},
@@ -22,6 +24,7 @@ impl ToolError {
         match self {
             ToolError::NotFound { .. } => ErrorClass::NotFound,
             ToolError::PathOutsideProject { .. } => ErrorClass::OutsideWorkspace,
+            ToolError::Blocked { .. } => ErrorClass::PermissionDenied,
             ToolError::InvalidArguments { .. } => ErrorClass::InvalidArguments,
             ToolError::Io { .. } => ErrorClass::Io,
             ToolError::Other(err) => match err.kind() {
@@ -56,6 +59,9 @@ impl fmt::Display for ToolError {
             ToolError::PathOutsideProject { path } => {
                 write!(f, "Path {path} is outside the workspace. Only paths inside the workspace are allowed.")
             }
+            ToolError::Blocked { path } => {
+                write!(f, "Access to {path} is blocked because it may hold secrets or harness logs. Do not try to read or change it.")
+            }
             ToolError::Io { message } => {
                 write!(f, "I/O error occurred: {message}")
             }
@@ -85,6 +91,7 @@ mod tests {
             ErrorClass::InvalidArguments
         );
         assert_eq!(ToolError::Io { message: "m".into() }.class(), ErrorClass::Io);
+        assert_eq!(ToolError::Blocked { path: ".env".into() }.class(), ErrorClass::PermissionDenied);
         assert_eq!(
             ToolError::from(io::Error::from(io::ErrorKind::PermissionDenied)).class(),
             ErrorClass::PermissionDenied

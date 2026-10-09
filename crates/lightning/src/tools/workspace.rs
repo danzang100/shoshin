@@ -28,6 +28,7 @@ impl Workspace {
         // Reject lexical escapes first, so `../missing` reports "outside" and not "not found".
         let normalised = normalise(&self.root.join(target));
         self.ensure_inside(&normalised, target)?;
+        self.ensure_not_protected(&normalised, target)?;
 
         let canonical_target = fs::canonicalize(&normalised).map_err(|err| match err.kind() {
             ErrorKind::PermissionDenied => ToolError::Io {
@@ -47,6 +48,8 @@ impl Workspace {
     pub fn resolve_for_write(&self, target_path: impl AsRef<Path>) -> Result<PathBuf, ToolError> {
         let target = target_path.as_ref();
         let normalised = normalise(&self.root.join(target));
+        self.ensure_inside(&normalised, target)?;
+        self.ensure_not_protected(&normalised, target)?;
 
         // Walk up to the nearest ancestor that exists, remembering what was cut off.
         let mut existing = normalised.as_path();
@@ -78,6 +81,21 @@ impl Workspace {
         Ok(resolved)
     }
 
+    /// Secrets (`.env`, `.env.*` except examples) and the harness's own `.lightning`
+    /// folder must never reach the model, even though they live in the workspace.
+    fn ensure_not_protected(&self, normalised: &Path, original: &Path) -> Result<(), ToolError> {
+        let relative = normalised.strip_prefix(&self.root).unwrap_or(normalised);
+        let blocked = relative.components().any(|c| match c {
+            Component::Normal(name) => is_protected_name(&name.to_string_lossy()),
+            _ => false,
+        });
+        if blocked {
+            Err(ToolError::Blocked { path: original.display().to_string() })
+        } else {
+            Ok(())
+        }
+    }
+
     fn ensure_inside(&self, canonical: &Path, original: &Path) -> Result<(), ToolError> {
         if canonical.starts_with(&self.root) {
             Ok(())
@@ -85,6 +103,14 @@ impl Workspace {
             Err(ToolError::PathOutsideProject { path: original.display().to_string() })
         }
     }
+}
+
+fn is_protected_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    if lower == ".lightning" || lower == ".env" {
+        return true;
+    }
+    lower.starts_with(".env.") && !(lower.ends_with(".example") || lower.ends_with(".sample") || lower.ends_with(".template"))
 }
 
 /// Folds `.` and `..` without touching the filesystem.
@@ -163,6 +189,22 @@ mod tests {
         fs::create_dir(dir.join("sub")).unwrap();
         assert!(ws.resolve_for_write("sub/../ok.txt").is_ok());
         assert!(matches!(ws.resolve_for_write("sub"), Err(ToolError::InvalidArguments { .. })));
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn secrets_and_harness_logs_are_blocked_for_read_and_write() {
+        let (ws, dir) = temp_workspace();
+        fs::write(dir.join(".env"), "GEMINI_API_KEY=x").unwrap();
+        fs::create_dir(dir.join(".lightning")).unwrap();
+        fs::write(dir.join(".env.example"), "KEY=").unwrap();
+        for path in [".env", ".ENV", ".env.local", ".lightning", ".lightning/sessions", "sub/../.env"] {
+            assert!(matches!(ws.resolve(path), Err(ToolError::Blocked { .. })), "read {path}");
+        }
+        assert!(matches!(ws.resolve_for_write(".env"), Err(ToolError::Blocked { .. })));
+        assert!(matches!(ws.resolve_for_write(".lightning/config.toml"), Err(ToolError::Blocked { .. })));
+        assert!(matches!(ws.resolve_for_write("a/.env.production"), Err(ToolError::Blocked { .. })));
+        assert!(ws.resolve(".env.example").is_ok());
         fs::remove_dir_all(dir).ok();
     }
 }
