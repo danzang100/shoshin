@@ -20,7 +20,8 @@ fn collect_args(kind:ToolKind) -> Result<ToolCall, InquireError> {
     }
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error>> {
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let ws = Workspace::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("test-folder"))?;
     let tool_options: Vec<ToolKind> = ToolKind::iter().collect(); 
     let tool_selected: ToolKind = Select::new("Choose the tool for use", tool_options).prompt()?;
@@ -31,8 +32,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn main() {
-    match run() {
+#[tokio::main]
+async fn main() {
+    match run().await {
         Ok(()) => {}
         Err(err) => {
             eprintln!("{}", err)

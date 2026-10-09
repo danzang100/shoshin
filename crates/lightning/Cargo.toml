@@ -5,7 +5,13 @@ edition = "2024"
 
 [dependencies]
 inquire = "0.9.4"
+dotenv = "0.15.0"
+reqwest = { version = "0.13.5", features = ["json"] }
 schemars = "1.2.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 strum = { version = "0.28.0", features = ["derive"] }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }

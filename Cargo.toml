@@ -1,3 +1,11 @@
 [workspace]
-members = ["crates/lightning"] 
+members = ["crates/lightning", "gui", "gui/src-tauri"] 
+default-members = ["crates/lightning"]
 resolver = "3"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
