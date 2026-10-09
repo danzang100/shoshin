@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::llm::{FinishReason, Usage};
+use crate::usage::{FinishReason, Usage};
 
 /// Schema version written into every event.
 pub const SCHEMA_VERSION: u32 = 1;

@@ -2758,6 +2758,7 @@ dependencies = [
  "clap",
  "dotenv",
  "inquire",
+ "lightning-protocol",
  "reqwest",
  "schemars 1.2.2",
  "serde",
@@ -2797,6 +2798,15 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "yew",
+]
+
+[[package]]
+name = "lightning-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

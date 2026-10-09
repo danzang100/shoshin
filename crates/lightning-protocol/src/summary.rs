@@ -1,13 +1,9 @@
 //! `summary.json`, always derived by folding events so it cannot disagree with them
 //! (spec 001, sections 9.2 and 13).
-use std::fs;
-use std::io;
-use std::path::Path;
-
 use serde::{Deserialize, Serialize};
 
-use super::event::{Event, EventKind, Outcome, SessionStatus};
-use crate::llm::Usage;
+use crate::event::{Event, EventKind, Outcome, SessionStatus};
+use crate::usage::Usage;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Summary {
@@ -85,22 +81,26 @@ impl Summary {
         s
     }
 
-    pub fn write(&self, path: &Path) -> io::Result<()> {
-        let text = serde_json::to_string_pretty(self).map_err(io::Error::from)?;
-        fs::write(path, text)
+}
+
+#[cfg(feature = "fs")]
+impl Summary {
+    pub fn write(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let text = serde_json::to_string_pretty(self).map_err(std::io::Error::from)?;
+        std::fs::write(path, text)
     }
 
-    pub fn read(path: &Path) -> io::Result<Summary> {
-        let text = fs::read_to_string(path)?;
-        serde_json::from_str(&text).map_err(io::Error::from)
+    pub fn read(path: &std::path::Path) -> std::io::Result<Summary> {
+        let text = std::fs::read_to_string(path)?;
+        serde_json::from_str(&text).map_err(std::io::Error::from)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::FinishReason;
-    use crate::obs::event::SCHEMA_VERSION;
+    use crate::event::SCHEMA_VERSION;
+    use crate::usage::FinishReason;
     use serde_json::json;
 
     fn ev(seq: u64, kind: EventKind) -> Event {
@@ -190,14 +190,15 @@ mod tests {
         assert_eq!(s.steps, 1);
     }
 
+    #[cfg(feature = "fs")]
     #[test]
     fn write_then_read_round_trips() {
         let dir = std::env::temp_dir().join(format!("lightning-test-summary-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
         let s = Summary::from_events("s", &[ev(1, EventKind::StepStarted { step: 1 })]);
         let path = dir.join("summary.json");
         s.write(&path).unwrap();
         assert_eq!(Summary::read(&path).unwrap(), s);
-        fs::remove_dir_all(dir).ok();
+        std::fs::remove_dir_all(dir).ok();
     }
 }

@@ -9,16 +9,16 @@ use std::sync::{Arc, Mutex};
 use chrono::{SecondsFormat, Utc};
 
 pub mod console;
-pub mod event;
 pub mod inspect;
 pub mod jsonl;
 pub mod redact;
-pub mod summary;
 
-pub use event::{Event, EventKind, Outcome, SCHEMA_VERSION, SessionStatus, ToolUseRef, preview};
+// The event model lives in `lightning-protocol` so the GUI can share it; these paths
+// keep `lightning::obs::event::...` and `lightning::obs::summary::...` working.
+pub use lightning_protocol::{event, summary};
+pub use lightning_protocol::{Event, EventKind, Outcome, SCHEMA_VERSION, SessionStatus, Summary, ToolUseRef, preview};
 pub use jsonl::{JsonlSink, PayloadLog, ReadReport, read_events};
 pub use redact::Redactor;
-pub use summary::Summary;
 
 /// Sortable session identifier: UTC timestamp plus 4 random hex chars.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

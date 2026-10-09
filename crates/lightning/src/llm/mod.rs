@@ -6,8 +6,6 @@ use std::fmt;
 use std::future::Future;
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
-
 use crate::tools::registry::ToolSpec;
 use crate::turn::Turn;
 
@@ -16,6 +14,7 @@ mod fake;
 pub mod gemini;
 
 pub use fake::FakeLlm;
+pub use lightning_protocol::{FinishReason, Usage};
 pub use gemini::GeminiClient;
 
 #[derive(Debug, Clone)]
@@ -43,40 +42,6 @@ pub struct LlmResponse {
 pub struct Exchange {
     pub request: serde_json::Value,
     pub response: serde_json::Value,
-}
-
-/// Token counts. Every field is optional because providers differ and the Gemini
-/// `total_*` fields are unreliable (see docs/gemini-notes.md).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Usage {
-    pub input_tokens: Option<u64>,
-    pub output_tokens: Option<u64>,
-    pub thinking_tokens: Option<u64>,
-}
-
-impl Usage {
-    /// Adds `other` into `self`, treating a missing value as zero unless both are missing.
-    pub fn add(&mut self, other: &Usage) {
-        fn sum(a: Option<u64>, b: Option<u64>) -> Option<u64> {
-            match (a, b) {
-                (None, None) => None,
-                (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
-            }
-        }
-        self.input_tokens = sum(self.input_tokens, other.input_tokens);
-        self.output_tokens = sum(self.output_tokens, other.output_tokens);
-        self.thinking_tokens = sum(self.thinking_tokens, other.thinking_tokens);
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FinishReason {
-    Stop,
-    ToolUse,
-    MaxTokens,
-    Safety,
-    Other(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -129,14 +94,6 @@ pub trait LlmClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn usage_add_treats_missing_as_zero_unless_both_missing() {
-        let mut total = Usage::default();
-        total.add(&Usage { input_tokens: Some(10), output_tokens: None, thinking_tokens: None });
-        total.add(&Usage { input_tokens: Some(5), output_tokens: Some(3), thinking_tokens: None });
-        assert_eq!(total, Usage { input_tokens: Some(15), output_tokens: Some(3), thinking_tokens: None });
-    }
 
     #[test]
     fn retryable_matches_policy() {
