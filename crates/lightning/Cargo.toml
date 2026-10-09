@@ -15,3 +15,5 @@ tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 tracing = "0.1.44"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde"] }
+uuid = { version = "1.27.0", features = ["v4"] }
