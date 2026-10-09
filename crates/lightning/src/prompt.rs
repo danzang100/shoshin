@@ -1,9 +1,7 @@
 //! The system prompt (spec 001, section 8). Bump [`PROMPT_VERSION`] whenever the text changes.
-use std::path::Path;
-
 pub const PROMPT_VERSION: &str = "1";
 
-pub fn system_prompt(workspace_root: &Path) -> String {
+pub fn system_prompt(workspace_root: &str) -> String {
     format!(
         "You are Lightning, a coding assistant running in a terminal. You work inside one workspace folder: {root}\n\
 \n\
@@ -14,7 +12,7 @@ Rules:\n\
 - If the user declines a change, do not retry it; ask how they want to proceed.\n\
 - Writing a file replaces its whole content, so read it first when you only mean to change part of it.\n\
 - When the task is done, reply with a short plain-text answer and no tool call. Be concise.",
-        root = workspace_root.display()
+        root = workspace_root
     )
 }
 
@@ -24,7 +22,7 @@ mod tests {
 
     #[test]
     fn mentions_the_workspace_and_core_rules() {
-        let p = system_prompt(Path::new("/work"));
+        let p = system_prompt("/work");
         assert!(p.contains("/work"));
         assert!(p.contains("relative to the workspace root"));
         assert!(p.contains("identical arguments"));

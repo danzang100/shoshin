@@ -21,6 +21,12 @@ impl Workspace {
         &self.root
     }
 
+    /// Root for showing to people and the model: without the Windows verbatim path prefix.
+    pub fn display_root(&self) -> String {
+        let text = self.root.display().to_string();
+        text.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(text)
+    }
+
     /// Resolves an existing path. Fails if it does not exist or escapes the workspace.
     pub fn resolve(&self, target_path: impl AsRef<Path>) -> Result<PathBuf, ToolError> {
         let target = target_path.as_ref();
@@ -205,6 +211,14 @@ mod tests {
         assert!(matches!(ws.resolve_for_write(".lightning/config.toml"), Err(ToolError::Blocked { .. })));
         assert!(matches!(ws.resolve_for_write("a/.env.production"), Err(ToolError::Blocked { .. })));
         assert!(ws.resolve(".env.example").is_ok());
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn display_root_has_no_verbatim_prefix() {
+        let (ws, dir) = temp_workspace();
+        assert!(!ws.display_root().starts_with(r"\\?\"));
+        assert!(ws.display_root().ends_with(dir.file_name().unwrap().to_str().unwrap()));
         fs::remove_dir_all(dir).ok();
     }
 }

@@ -60,3 +60,90 @@ async fn bad_key_is_classified_as_auth() {
     let err = c.complete(request(vec![Turn::User { text: "hi".into() }], false)).await.unwrap_err();
     assert_eq!(err, lightning::llm::LlmError::Auth);
 }
+
+mod session {
+    use std::sync::Arc;
+
+    use lightning::llm::GeminiClient;
+    use lightning::llm::gemini::DEFAULT_MODEL;
+    use lightning::obs::{EventKind, MemorySink, Recorder, Redactor, SessionId, SessionStatus};
+    use lightning::session::{Session, SessionConfig};
+    use lightning::tools::dispatch::{Dispatcher, ToolLimits};
+    use lightning::tools::gate::{FixedPrompter, Gate, PermissionMode};
+    use lightning::tools::workspace::Workspace;
+    use lightning::turn::Turn;
+
+    fn live_session(dir: &std::path::Path, mode: PermissionMode, approve: bool) -> (Session<GeminiClient>, MemorySink) {
+        dotenv::dotenv().ok();
+        let sink = MemorySink::default();
+        let rec = Recorder::new(SessionId::new(), Redactor::from_env(), vec![Box::new(sink.clone())]);
+        let gate = Gate::new(mode, Arc::new(FixedPrompter(approve)));
+        let dispatcher = Dispatcher::new(Workspace::new(dir).unwrap(), ToolLimits::default(), gate);
+        let llm = GeminiClient::from_env(DEFAULT_MODEL).expect("GEMINI_API_KEY must be set");
+        (Session::new(llm, dispatcher, rec, SessionConfig::new("gemini", DEFAULT_MODEL)), sink)
+    }
+
+    fn temp_dir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("lightning-live-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn last_text(session: &Session<GeminiClient>) -> String {
+        match session.history().last() {
+            Some(Turn::Assistant { text, .. }) => text.clone().unwrap_or_default(),
+            other => panic!("expected assistant turn, got {other:?}"),
+        }
+    }
+
+    /// Scenario 5: the model sees earlier turns of the same session.
+    #[tokio::test]
+    #[ignore = "calls the live Gemini API"]
+    async fn follow_up_uses_earlier_turns() {
+        let dir = temp_dir();
+        let (mut session, sink) = live_session(&dir, PermissionMode::Ask, false);
+        assert_eq!(session.run_turn("My lucky number is 4217. Just acknowledge it.").await, SessionStatus::Completed);
+        assert_eq!(session.run_turn("What was my lucky number? Answer with the number only.").await, SessionStatus::Completed);
+        assert!(last_text(&session).contains("4217"), "got: {}", last_text(&session));
+        session.end(SessionStatus::Completed);
+        let users = sink.events().iter().filter(|e| matches!(e.kind, EventKind::UserMessage { .. })).count();
+        assert_eq!(users, 2);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// Scenario 2: a failing tool call is recoverable.
+    #[tokio::test]
+    #[ignore = "calls the live Gemini API"]
+    async fn missing_file_is_recoverable() {
+        let dir = temp_dir();
+        let (mut session, sink) = live_session(&dir, PermissionMode::Ask, false);
+        assert_eq!(session.run("Read the file nothing_here.txt and tell me its contents.").await, SessionStatus::Completed);
+        let errors = sink
+            .events()
+            .iter()
+            .filter(|e| matches!(&e.kind, EventKind::ToolFinished { error_class: Some(c), .. } if c == "not_found"))
+            .count();
+        assert!(errors >= 1);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// Scenario 9: approve writes the file, deny leaves it absent, both complete.
+    #[tokio::test]
+    #[ignore = "calls the live Gemini API"]
+    async fn write_file_through_the_gate() {
+        let task = "Create the file notes.txt containing the single word: hello";
+
+        let approved = temp_dir();
+        let (mut session, _) = live_session(&approved, PermissionMode::Ask, true);
+        assert_eq!(session.run(task).await, SessionStatus::Completed);
+        assert!(std::fs::read_to_string(approved.join("notes.txt")).unwrap().to_lowercase().contains("hello"));
+
+        let denied = temp_dir();
+        let (mut session, _) = live_session(&denied, PermissionMode::Ask, false);
+        assert_eq!(session.run(task).await, SessionStatus::Completed);
+        assert!(!denied.join("notes.txt").exists());
+
+        std::fs::remove_dir_all(approved).ok();
+        std::fs::remove_dir_all(denied).ok();
+    }
+}

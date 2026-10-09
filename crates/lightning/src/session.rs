@@ -137,11 +137,11 @@ pub struct Session<L: LlmClient> {
 impl<L: LlmClient> Session<L> {
     /// Creates the session and records `session_started`.
     pub fn new(llm: L, dispatcher: Dispatcher, rec: Recorder, config: SessionConfig) -> Self {
-        let system = system_prompt(dispatcher.workspace().root());
+        let system = system_prompt(&dispatcher.workspace().display_root());
         let session_span = rec.new_span();
         rec.emit(
             EventKind::SessionStarted {
-                workspace: dispatcher.workspace().root().display().to_string(),
+                workspace: dispatcher.workspace().display_root(),
                 provider: config.provider.clone(),
                 model: config.model.clone(),
                 prompt_version: PROMPT_VERSION.to_string(),

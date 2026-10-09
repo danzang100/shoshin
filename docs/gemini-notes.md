@@ -91,7 +91,7 @@ Consequences for `LlmError`:
 - Classify auth by `details[].reason == "API_KEY_INVALID"` (and HTTP 401/403), not by status alone.
 - Parse the error body as either an object or an array of objects; on parse failure keep the raw text.
 - Misleading error: an **empty `input` array** returned 404 `Model 'gemini-3.5-flash-lite' not found`, although the model exists. A 404 "model not found" therefore does not prove the model name is wrong; the adapter should never send an empty `input`, and the message should be logged with the request step count.
-- 429 and 5xx behaviour was not triggered; the retry policy in spec 001 section 6.4 remains **unverified** against real rate-limit bodies.
+- 429 was hit for real during the T9 end-to-end run (a normal CLI session on `gemini-3.5-flash-lite`): the response carried a retry delay of 16 s, which `classify_error` turned into `RateLimited { retry_after: Some(16s) }`; the session waited, retried once and completed. 5xx bodies are still unobserved.
 
 ## Other facts
 
@@ -102,7 +102,7 @@ Consequences for `LlmError`:
 ## Still unverified
 
 - Parallel function calls (several `function_call` steps in one response).
-- 429 / 5xx / timeout bodies and `Retry-After`.
+- 5xx / timeout bodies. (429 handling was seen working; see Errors.)
 - Behaviour with a tool schema that has nullable params when the model does call it.
 - Whether `thought` steps become mandatory with `thinking_level: "high"` plus tool calls over several steps.
 - Context-size limits and the error returned when exceeded.
