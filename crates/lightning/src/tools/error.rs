@@ -1,5 +1,7 @@
-use std::io;
 use std::fmt;
+use std::io;
+
+use crate::turn::ErrorClass;
 
 #[derive(Debug)]
 pub enum ToolError {
@@ -13,6 +15,23 @@ pub enum ToolError {
 }
 
 impl std::error::Error for ToolError {}
+
+impl ToolError {
+    /// Category shown to the model and recorded in logs.
+    pub fn class(&self) -> ErrorClass {
+        match self {
+            ToolError::NotFound { .. } => ErrorClass::NotFound,
+            ToolError::PathOutsideProject { .. } => ErrorClass::OutsideWorkspace,
+            ToolError::InvalidArguments { .. } => ErrorClass::InvalidArguments,
+            ToolError::Io { .. } => ErrorClass::Io,
+            ToolError::Other(err) => match err.kind() {
+                io::ErrorKind::NotFound => ErrorClass::NotFound,
+                io::ErrorKind::PermissionDenied => ErrorClass::PermissionDenied,
+                _ => ErrorClass::Io,
+            },
+        }
+    }
+}
 
 impl From<io::Error> for ToolError {
     fn from(err: io::Error) -> Self {
@@ -50,3 +69,33 @@ impl fmt::Display for ToolError {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classes_map_as_specified() {
+        assert_eq!(ToolError::NotFound { path: "x".into() }.class(), ErrorClass::NotFound);
+        assert_eq!(
+            ToolError::PathOutsideProject { path: "..".into() }.class(),
+            ErrorClass::OutsideWorkspace
+        );
+        assert_eq!(
+            ToolError::InvalidArguments { message: "m".into() }.class(),
+            ErrorClass::InvalidArguments
+        );
+        assert_eq!(ToolError::Io { message: "m".into() }.class(), ErrorClass::Io);
+        assert_eq!(
+            ToolError::from(io::Error::from(io::ErrorKind::PermissionDenied)).class(),
+            ErrorClass::PermissionDenied
+        );
+        assert_eq!(
+            ToolError::from(io::Error::from(io::ErrorKind::NotFound)).class(),
+            ErrorClass::NotFound
+        );
+        assert_eq!(
+            ToolError::from(io::Error::from(io::ErrorKind::TimedOut)).class(),
+            ErrorClass::Io
+        );
+    }
+}

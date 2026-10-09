@@ -49,7 +49,7 @@ impl fmt::Display for ToolKind {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 pub struct ToolSpec {
     pub name: &'static str,
     pub description: String,
@@ -80,14 +80,4 @@ pub fn execute(ws:&workspace::Workspace, call: ToolCall) -> Result<ToolOutput, T
 pub fn execute_json(ws:&workspace::Workspace, call: serde_json::Value) -> Result<ToolOutput, ToolError> {
     let tool_json = serde_json::from_value::<ToolCall>(call)?;
     execute(ws, tool_json)
-}
-
-#[cfg(test)] 
-mod tests {
-    use super::*;
-
-    #[test]
-    fn tool_names_round_trip() {
-        
-    }
 }

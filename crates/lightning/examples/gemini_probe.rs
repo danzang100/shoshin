@@ -43,11 +43,9 @@ fn tool_decls(strip: bool) -> Vec<Value> {
         .into_iter()
         .map(|spec| {
             let mut params = spec.parameters.clone();
-            if strip {
-                if let Some(obj) = params.as_object_mut() {
-                    obj.remove("$schema");
-                    obj.remove("title");
-                }
+            if strip && let Some(obj) = params.as_object_mut() {
+                obj.remove("$schema");
+                obj.remove("title");
             }
             json!({ "type": "function", "name": spec.name, "description": spec.description, "parameters": params })
         })
