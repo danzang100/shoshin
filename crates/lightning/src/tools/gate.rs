@@ -1,4 +1,6 @@
 //! Minimal permission gate (spec 001, section 7.3). Called only from dispatch.
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -25,10 +27,15 @@ pub struct ApprovalRequest {
     pub summary: String,
 }
 
+/// Boxed future so `Prompter` stays object-safe.
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
 /// Source of yes/no answers. The CLI implements this with a terminal prompt, the
-/// GUI later with a dialog. The call may block while the user decides.
+/// GUI with a dialog. The answer may take minutes; dispatch races this future against
+/// cancellation and drops it when cancelled, so implementations must clean up in `Drop`
+/// (for example close the dialog).
 pub trait Prompter: Send + Sync {
-    fn confirm(&self, request: &ApprovalRequest) -> bool;
+    fn confirm<'a>(&'a self, request: &'a ApprovalRequest) -> BoxFuture<'a, bool>;
 }
 
 /// Answers every request the same way. `FixedPrompter(false)` is the
@@ -36,8 +43,8 @@ pub trait Prompter: Send + Sync {
 pub struct FixedPrompter(pub bool);
 
 impl Prompter for FixedPrompter {
-    fn confirm(&self, _request: &ApprovalRequest) -> bool {
-        self.0
+    fn confirm<'a>(&'a self, _request: &'a ApprovalRequest) -> BoxFuture<'a, bool> {
+        Box::pin(std::future::ready(self.0))
     }
 }
 
@@ -57,7 +64,7 @@ impl Gate {
         Gate { mode, prompter }
     }
 
-    pub fn check(&self, kind: ToolKind, tool_use: &ToolUse) -> Decision {
+    pub async fn check(&self, kind: ToolKind, tool_use: &ToolUse) -> Decision {
         if !kind.needs_approval() {
             return Decision { allowed: true, reason: "read-only tool".into() };
         }
@@ -66,7 +73,7 @@ impl Gate {
             PermissionMode::Deny => Decision { allowed: false, reason: "permission mode: deny".into() },
             PermissionMode::Ask => {
                 let request = ApprovalRequest { tool: tool_use.name.clone(), summary: describe(&tool_use.name, &tool_use.arguments) };
-                if self.prompter.confirm(&request) {
+                if self.prompter.confirm(&request).await {
                     Decision { allowed: true, reason: "approved by user".into() }
                 } else {
                     Decision { allowed: false, reason: "declined by user".into() }
@@ -100,36 +107,36 @@ mod tests {
     struct Recording(Mutex<Vec<ApprovalRequest>>);
 
     impl Prompter for Recording {
-        fn confirm(&self, request: &ApprovalRequest) -> bool {
+        fn confirm<'a>(&'a self, request: &'a ApprovalRequest) -> BoxFuture<'a, bool> {
             self.0.lock().unwrap().push(request.clone());
-            true
+            Box::pin(std::future::ready(true))
         }
     }
 
-    #[test]
-    fn read_only_tools_never_prompt() {
+    #[tokio::test]
+    async fn read_only_tools_never_prompt() {
         let gate = Gate::new(PermissionMode::Deny, Arc::new(FixedPrompter(false)));
-        assert!(gate.check(ToolKind::ReadFile, &write_use()).allowed);
+        assert!(gate.check(ToolKind::ReadFile, &write_use()).await.allowed);
     }
 
-    #[test]
-    fn modes_decide_for_state_changing_tools() {
+    #[tokio::test]
+    async fn modes_decide_for_state_changing_tools() {
         let tu = write_use();
         let allow = Gate::new(PermissionMode::Allow, Arc::new(FixedPrompter(false)));
         let deny = Gate::new(PermissionMode::Deny, Arc::new(FixedPrompter(true)));
-        assert!(allow.check(ToolKind::WriteFile, &tu).allowed);
-        assert!(!deny.check(ToolKind::WriteFile, &tu).allowed);
+        assert!(allow.check(ToolKind::WriteFile, &tu).await.allowed);
+        assert!(!deny.check(ToolKind::WriteFile, &tu).await.allowed);
     }
 
-    #[test]
-    fn ask_defers_to_the_prompter_with_a_readable_summary() {
+    #[tokio::test]
+    async fn ask_defers_to_the_prompter_with_a_readable_summary() {
         let rec = Arc::new(Recording(Mutex::new(Vec::new())));
         let gate = Gate::new(PermissionMode::Ask, rec.clone());
-        assert!(gate.check(ToolKind::WriteFile, &write_use()).allowed);
+        assert!(gate.check(ToolKind::WriteFile, &write_use()).await.allowed);
         assert_eq!(rec.0.lock().unwrap()[0].summary, "write a.txt (3 bytes)");
 
         let no = Gate::new(PermissionMode::Ask, Arc::new(FixedPrompter(false)));
-        let d = no.check(ToolKind::WriteFile, &write_use());
+        let d = no.check(ToolKind::WriteFile, &write_use()).await;
         assert!(!d.allowed);
         assert_eq!(d.reason, "declined by user");
     }

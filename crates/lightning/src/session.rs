@@ -1,12 +1,10 @@
 //! The orchestrator loop (spec 001, section 8): one session, many user turns, every
 //! fact recorded through the [`Recorder`].
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use tokio::sync::Notify;
 
+pub use crate::cancel::CancelToken;
 use crate::llm::{LlmClient, LlmError, LlmRequest, LlmResponse, Usage};
 use crate::obs::{
     EventKind, Outcome, PayloadLog, Recorder, SessionDir, SessionStatus, Summary, ToolUseRef, read_events,
@@ -14,40 +12,6 @@ use crate::obs::{
 use crate::prompt::{PROMPT_VERSION, system_prompt};
 use crate::tools::dispatch::Dispatcher;
 use crate::turn::{ErrorClass, ToolOutcome, ToolResult, ToolUse, Turn};
-
-/// Cooperative cancellation shared between the session and whoever owns Ctrl+C.
-#[derive(Clone, Default)]
-pub struct CancelToken {
-    inner: Arc<CancelInner>,
-}
-
-#[derive(Default)]
-struct CancelInner {
-    flag: AtomicBool,
-    notify: Notify,
-}
-
-impl CancelToken {
-    pub fn cancel(&self) {
-        self.inner.flag.store(true, Ordering::SeqCst);
-        self.inner.notify.notify_waiters();
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.inner.flag.load(Ordering::SeqCst)
-    }
-
-    /// Resolves once cancelled.
-    pub async fn cancelled(&self) {
-        loop {
-            let notified = self.inner.notify.notified();
-            if self.is_cancelled() {
-                return;
-            }
-            notified.await;
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub struct RetryPolicy {
@@ -345,7 +309,7 @@ impl<L: LlmClient> Session<L> {
                 });
                 continue;
             }
-            let mut result = self.dispatcher.dispatch(&self.rec, Some(step_span), tool_use).await;
+            let mut result = self.dispatcher.dispatch(&self.rec, Some(step_span), tool_use, &self.cancel).await;
             self.tool_calls += 1;
             if result.outcome.is_error() {
                 self.tool_errors += 1;
@@ -485,6 +449,7 @@ impl<L: LlmClient> Session<L> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use crate::llm::{FakeLlm, FinishReason};
     use crate::obs::{Event, JsonlSink, MemorySink, Redactor, SessionId};
     use crate::tools::dispatch::ToolLimits;
@@ -833,5 +798,18 @@ mod tests {
 
         fs::remove_dir_all(dir).ok();
         fs::remove_dir_all(home).ok();
+    }
+
+    /// The GUI host spawns turns onto the runtime, so the session and its futures must be `Send`.
+    #[test]
+    fn session_and_run_turn_future_are_send() {
+        fn assert_send<T: Send>(_: &T) {}
+        fn assert_send_static<T: Send + 'static>() {}
+        assert_send_static::<Session<crate::llm::GeminiClient>>();
+        assert_send_static::<Session<FakeLlm>>();
+        let _check = |session: &mut Session<crate::llm::GeminiClient>| {
+            let fut = session.run_turn("x");
+            assert_send(&fut);
+        };
     }
 }

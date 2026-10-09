@@ -6,8 +6,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 
+use crate::cancel::CancelToken;
 use crate::obs::{EventKind, Outcome, Recorder, preview};
-use crate::tools::gate::Gate;
+use crate::tools::gate::{Decision, Gate};
 use crate::tools::registry::{self, ToolCall, ToolKind, ToolSpec};
 use crate::tools::workspace::Workspace;
 use crate::tools::{ToolError, ToolOutput};
@@ -50,7 +51,13 @@ impl Dispatcher {
 
     /// Runs one tool call and always returns a result, never an error: failures are
     /// `ToolOutcome::Error` so the model can react to them.
-    pub async fn dispatch(&self, rec: &Recorder, parent_span: Option<&str>, tool_use: &ToolUse) -> ToolResult {
+    pub async fn dispatch(
+        &self,
+        rec: &Recorder,
+        parent_span: Option<&str>,
+        tool_use: &ToolUse,
+        cancel: &CancelToken,
+    ) -> ToolResult {
         let span = rec.new_span();
         rec.emit(
             EventKind::ToolStarted {
@@ -63,7 +70,7 @@ impl Dispatcher {
         );
         let started = Instant::now();
 
-        let outcome = self.run(rec, &span, tool_use).await;
+        let outcome = self.run(rec, &span, tool_use, cancel).await;
         let outcome = truncate(outcome, self.limits.output_cap_bytes);
 
         let (kind, error_class, message, text, truncated) = match &outcome {
@@ -89,7 +96,7 @@ impl Dispatcher {
         ToolResult { tool_use_id: tool_use.id.clone(), name: tool_use.name.clone(), outcome }
     }
 
-    async fn run(&self, rec: &Recorder, span: &str, tool_use: &ToolUse) -> ToolOutcome {
+    async fn run(&self, rec: &Recorder, span: &str, tool_use: &ToolUse, cancel: &CancelToken) -> ToolOutcome {
         let Some(kind) = ToolKind::from_name(&tool_use.name) else {
             let names: Vec<&'static str> = registry::tool_specs().iter().map(|s| s.name).collect();
             return ToolOutcome::Error {
@@ -105,7 +112,12 @@ impl Dispatcher {
             Err(err) => return ToolError::from(err).into(),
         };
 
-        let decision = self.gate.check(kind, tool_use);
+        // The approval may take minutes (GUI dialog); cancelling denies it and drops the prompt.
+        let decision = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Decision { allowed: false, reason: "cancelled".to_string() },
+            decision = self.gate.check(kind, tool_use) => decision,
+        };
         rec.emit(
             EventKind::GateDecision {
                 tool_use_id: tool_use.id.clone(),
@@ -123,19 +135,26 @@ impl Dispatcher {
         }
 
         let ws = self.workspace.clone();
-        guarded(move || registry::execute(&ws, call), self.limits.timeout).await
+        guarded(move || registry::execute(&ws, call), self.limits.timeout, cancel).await
     }
 }
 
 /// Runs blocking tool code off the async threads, with a deadline, mapping panics
 /// and timeouts to outcomes. A timed-out closure keeps running in the background
 /// (threads cannot be killed); `run_shell` will additionally kill its child process.
-async fn guarded<F>(work: F, timeout: Duration) -> ToolOutcome
+async fn guarded<F>(work: F, timeout: Duration, cancel: &CancelToken) -> ToolOutcome
 where
     F: FnOnce() -> Result<ToolOutput, ToolError> + Send + 'static,
 {
     let handle = tokio::task::spawn_blocking(work);
-    match tokio::time::timeout(timeout, handle).await {
+    let finished = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => {
+            return ToolOutcome::Error { class: ErrorClass::Internal, message: "Cancelled by the user.".into() };
+        }
+        r = tokio::time::timeout(timeout, handle) => r,
+    };
+    match finished {
         Err(_) => ToolOutcome::Error {
             class: ErrorClass::Timeout,
             message: format!("The tool did not finish within {} seconds and was abandoned.", timeout.as_secs_f32()),
@@ -206,7 +225,7 @@ mod tests {
     async fn happy_path_returns_content_and_emits_matching_events() {
         let (d, rec, sink, dir) = setup(PermissionMode::Ask, false, ToolLimits::default());
         fs::write(dir.join("a.txt"), "hello").unwrap();
-        let r = d.dispatch(&rec, Some("s_parent"), &tu("read_file", json!({ "file_path": "a.txt" }))).await;
+        let r = d.dispatch(&rec, Some("s_parent"), &tu("read_file", json!({ "file_path": "a.txt" })), &CancelToken::default()).await;
         assert!(matches!(&r.outcome, ToolOutcome::Ok { content, .. } if content == "hello"));
         assert_eq!(r.tool_use_id, "call_1");
 
@@ -230,19 +249,19 @@ mod tests {
     #[tokio::test]
     async fn tool_failures_become_typed_results() {
         let (d, rec, sink, dir) = setup(PermissionMode::Ask, false, ToolLimits::default());
-        let missing = d.dispatch(&rec, None, &tu("read_file", json!({ "file_path": "nope.txt" }))).await;
+        let missing = d.dispatch(&rec, None, &tu("read_file", json!({ "file_path": "nope.txt" })), &CancelToken::default()).await;
         assert_eq!(error_class(&missing), ErrorClass::NotFound);
 
-        let outside = d.dispatch(&rec, None, &tu("read_file", json!({ "file_path": "../x" }))).await;
+        let outside = d.dispatch(&rec, None, &tu("read_file", json!({ "file_path": "../x" })), &CancelToken::default()).await;
         assert_eq!(error_class(&outside), ErrorClass::OutsideWorkspace);
 
-        let unknown = d.dispatch(&rec, None, &tu("rm_rf", json!({}))).await;
+        let unknown = d.dispatch(&rec, None, &tu("rm_rf", json!({})), &CancelToken::default()).await;
         assert_eq!(error_class(&unknown), ErrorClass::UnknownTool);
         assert!(matches!(&unknown.outcome, ToolOutcome::Error { message, .. } if message.contains("read_file")));
 
-        let bad = d.dispatch(&rec, None, &tu("read_file", json!({ "file_path": 5 }))).await;
+        let bad = d.dispatch(&rec, None, &tu("read_file", json!({ "file_path": 5 })), &CancelToken::default()).await;
         assert_eq!(error_class(&bad), ErrorClass::InvalidArguments);
-        let missing_arg = d.dispatch(&rec, None, &tu("read_file", json!({}))).await;
+        let missing_arg = d.dispatch(&rec, None, &tu("read_file", json!({})), &CancelToken::default()).await;
         assert_eq!(error_class(&missing_arg), ErrorClass::InvalidArguments);
 
         let finished = sink
@@ -257,7 +276,7 @@ mod tests {
     #[tokio::test]
     async fn null_arguments_use_defaults() {
         let (d, rec, _sink, dir) = setup(PermissionMode::Ask, false, ToolLimits::default());
-        let r = d.dispatch(&rec, None, &tu("list_dir", serde_json::Value::Null)).await;
+        let r = d.dispatch(&rec, None, &tu("list_dir", serde_json::Value::Null), &CancelToken::default()).await;
         assert!(!r.outcome.is_error());
         fs::remove_dir_all(dir).ok();
     }
@@ -265,7 +284,7 @@ mod tests {
     #[tokio::test]
     async fn gate_denial_blocks_the_write_and_tells_the_model() {
         let (d, rec, sink, dir) = setup(PermissionMode::Ask, false, ToolLimits::default());
-        let r = d.dispatch(&rec, None, &tu("write_file", json!({ "file_path": "n.txt", "content": "x" }))).await;
+        let r = d.dispatch(&rec, None, &tu("write_file", json!({ "file_path": "n.txt", "content": "x" })), &CancelToken::default()).await;
         assert_eq!(error_class(&r), ErrorClass::Denied);
         assert!(!dir.join("n.txt").exists());
         let gate = sink.events().into_iter().find_map(|e| match e.kind {
@@ -279,12 +298,12 @@ mod tests {
     #[tokio::test]
     async fn approved_write_happens_and_deny_mode_overrides_prompter() {
         let (d, rec, _s, dir) = setup(PermissionMode::Ask, true, ToolLimits::default());
-        let r = d.dispatch(&rec, None, &tu("write_file", json!({ "file_path": "n.txt", "content": "x" }))).await;
+        let r = d.dispatch(&rec, None, &tu("write_file", json!({ "file_path": "n.txt", "content": "x" })), &CancelToken::default()).await;
         assert!(!r.outcome.is_error());
         assert_eq!(fs::read_to_string(dir.join("n.txt")).unwrap(), "x");
 
         let (d, rec, _s, dir2) = setup(PermissionMode::Deny, true, ToolLimits::default());
-        let r = d.dispatch(&rec, None, &tu("write_file", json!({ "file_path": "n.txt", "content": "x" }))).await;
+        let r = d.dispatch(&rec, None, &tu("write_file", json!({ "file_path": "n.txt", "content": "x" })), &CancelToken::default()).await;
         assert_eq!(error_class(&r), ErrorClass::Denied);
         fs::remove_dir_all(dir).ok();
         fs::remove_dir_all(dir2).ok();
@@ -293,7 +312,7 @@ mod tests {
     #[tokio::test]
     async fn write_outside_workspace_is_rejected_even_when_allowed() {
         let (d, rec, _s, dir) = setup(PermissionMode::Allow, true, ToolLimits::default());
-        let r = d.dispatch(&rec, None, &tu("write_file", json!({ "file_path": "../evil.txt", "content": "x" }))).await;
+        let r = d.dispatch(&rec, None, &tu("write_file", json!({ "file_path": "../evil.txt", "content": "x" })), &CancelToken::default()).await;
         assert_eq!(error_class(&r), ErrorClass::OutsideWorkspace);
         fs::remove_dir_all(dir).ok();
     }
@@ -303,7 +322,7 @@ mod tests {
         let limits = ToolLimits { output_cap_bytes: 10, ..ToolLimits::default() };
         let (d, rec, sink, dir) = setup(PermissionMode::Ask, false, limits);
         fs::write(dir.join("big.txt"), "0123456789abcdefghij").unwrap();
-        let r = d.dispatch(&rec, None, &tu("read_file", json!({ "file_path": "big.txt" }))).await;
+        let r = d.dispatch(&rec, None, &tu("read_file", json!({ "file_path": "big.txt" })), &CancelToken::default()).await;
         match &r.outcome {
             ToolOutcome::Ok { content, truncated, .. } => {
                 assert!(*truncated);
@@ -323,11 +342,79 @@ mod tests {
                 Ok(ToolOutput { content: String::new(), metadata: json!({}) })
             },
             Duration::from_millis(30),
+            &CancelToken::default(),
         )
         .await;
         assert!(matches!(slow, ToolOutcome::Error { class: ErrorClass::Timeout, .. }));
 
-        let boom = guarded(|| panic!("boom"), Duration::from_secs(5)).await;
+        let boom = guarded(|| panic!("boom"), Duration::from_secs(5), &CancelToken::default()).await;
         assert!(matches!(boom, ToolOutcome::Error { class: ErrorClass::Internal, .. }));
+    }
+
+    /// A prompter that never answers and records when its pending prompt is dropped.
+    struct Hanging(Arc<std::sync::atomic::AtomicBool>);
+
+    struct DropFlag(Arc<std::sync::atomic::AtomicBool>);
+
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    impl crate::tools::gate::Prompter for Hanging {
+        fn confirm<'a>(&'a self, _r: &'a crate::tools::gate::ApprovalRequest) -> crate::tools::gate::BoxFuture<'a, bool> {
+            let flag = DropFlag(self.0.clone());
+            Box::pin(async move {
+                let _flag = flag;
+                std::future::pending::<bool>().await
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_while_approval_is_pending_denies_and_drops_the_prompt() {
+        let (ws, dir) = temp_workspace();
+        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let gate = Gate::new(PermissionMode::Ask, Arc::new(Hanging(dropped.clone())));
+        let d = Dispatcher::new(ws, ToolLimits::default(), gate);
+        let rec = Recorder::new(SessionId::from("t"), Redactor::default(), vec![]);
+        let cancel = CancelToken::default();
+        let trigger = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            trigger.cancel();
+        });
+        let call = tu("write_file", json!({ "file_path": "n.txt", "content": "x" }));
+        let r = tokio::time::timeout(Duration::from_secs(5), d.dispatch(&rec, None, &call, &cancel))
+            .await
+            .expect("cancel must interrupt the pending approval");
+        assert_eq!(error_class(&r), ErrorClass::Denied);
+        assert!(matches!(&r.outcome, ToolOutcome::Error { message, .. } if message.contains("cancelled")));
+        assert!(dropped.load(std::sync::atomic::Ordering::SeqCst), "pending prompt must be dropped");
+        assert!(!dir.join("n.txt").exists());
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
+    async fn cancel_during_a_running_tool_returns_promptly() {
+        let cancel = CancelToken::default();
+        let trigger = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            trigger.cancel();
+        });
+        let started = Instant::now();
+        let out = guarded(
+            || {
+                std::thread::sleep(Duration::from_millis(600));
+                Ok(ToolOutput { content: String::new(), metadata: json!({}) })
+            },
+            Duration::from_secs(30),
+            &cancel,
+        )
+        .await;
+        assert!(started.elapsed() < Duration::from_millis(400));
+        assert!(matches!(out, ToolOutcome::Error { class: ErrorClass::Internal, ref message } if message.contains("Cancelled")));
     }
 }

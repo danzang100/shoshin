@@ -14,7 +14,7 @@ use crate::obs::inspect;
 use crate::obs::{EventSink, JsonlSink, PayloadLog, Recorder, Redactor, SessionDir, SessionId, SessionStatus};
 use crate::session::{RetryPolicy, Session, SessionConfig};
 use crate::tools::dispatch::{Dispatcher, ToolLimits};
-use crate::tools::gate::{ApprovalRequest, FixedPrompter, Gate, PermissionMode, Prompter};
+use crate::tools::gate::{ApprovalRequest, BoxFuture, FixedPrompter, Gate, PermissionMode, Prompter};
 use crate::tools::workspace::Workspace;
 
 #[derive(Debug, Parser)]
@@ -138,11 +138,14 @@ fn sessions_command(args: HomeArgs) -> u8 {
 struct TerminalPrompter;
 
 impl Prompter for TerminalPrompter {
-    fn confirm(&self, request: &ApprovalRequest) -> bool {
-        inquire::Confirm::new(&format!("Allow the assistant to {}?", request.summary))
-            .with_default(false)
-            .prompt()
-            .unwrap_or(false)
+    fn confirm<'a>(&'a self, request: &'a ApprovalRequest) -> BoxFuture<'a, bool> {
+        let question = format!("Allow the assistant to {}?", request.summary);
+        Box::pin(async move {
+            // inquire blocks on the terminal, so keep it off the async worker threads.
+            tokio::task::spawn_blocking(move || inquire::Confirm::new(&question).with_default(false).prompt().unwrap_or(false))
+                .await
+                .unwrap_or(false)
+        })
     }
 }
 
