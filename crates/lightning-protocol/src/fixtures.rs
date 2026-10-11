@@ -200,6 +200,43 @@ pub fn approval_denied() -> Vec<Event> {
     s.build()
 }
 
+/// A write that the user allows; same prefix as [`approval_denied`] up to the gate decision.
+pub fn approval_allowed() -> Vec<Event> {
+    let mut s = Stream::new();
+    started(&mut s);
+    s.push(1, EventKind::UserMessage { text: "Create notes.txt".into() });
+    s.push(1, EventKind::StepStarted { step: 1 });
+    llm_tool_use(&mut s, 700, "c1", "write_file");
+    s.push(
+        1,
+        EventKind::ToolStarted {
+            tool_use_id: "c1".into(),
+            name: "write_file".into(),
+            arguments: json!({ "file_path": "notes.txt", "content": "hello" }),
+        },
+    );
+    s.push(4000, EventKind::GateDecision { tool_use_id: "c1".into(), allowed: true, reason: "approved by user".into() });
+    s.push(
+        3,
+        EventKind::ToolFinished {
+            tool_use_id: "c1".into(),
+            name: "write_file".into(),
+            outcome: Outcome::Ok,
+            error_class: None,
+            message: None,
+            preview: "Created notes.txt (5 bytes)".into(),
+            output_bytes: 27,
+            truncated: false,
+            duration_ms: 4003,
+        },
+    );
+    s.push(1, EventKind::StepFinished { step: 1, duration_ms: 4705 });
+    s.push(1, EventKind::StepStarted { step: 2 });
+    answer(&mut s, 2, "I created notes.txt.");
+    ended(&mut s, SessionStatus::Completed, 2, 1, 0);
+    s.build()
+}
+
 /// A rate-limited call that succeeds on retry.
 pub fn retry_then_ok() -> Vec<Event> {
     let mut s = Stream::new();

@@ -293,6 +293,19 @@ mod tests {
     }
 
     #[test]
+    fn allowed_write_and_denied_write_share_a_prefix_up_to_the_gate() {
+        let allowed = fixtures::approval_allowed();
+        let denied = fixtures::approval_denied();
+        let gate = |events: &[Event]| events.iter().position(|e| matches!(e.kind, EventKind::GateDecision { .. })).unwrap();
+        assert_eq!(gate(&allowed), gate(&denied));
+        let g = gate(&allowed);
+        assert_eq!(&allowed[..g], &denied[..g]);
+        let m = TimelineModel::fold(&allowed);
+        assert!(matches!(&tools(&m)[0].state, ToolState::Ok { .. }));
+        assert_eq!(m.tool_errors, 0);
+    }
+
+    #[test]
     fn denied_write_carries_the_gate_decision() {
         let m = TimelineModel::fold(&fixtures::approval_denied());
         let t = tools(&m);
