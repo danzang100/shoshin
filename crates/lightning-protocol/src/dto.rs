@@ -2,7 +2,8 @@
 //! snake_case throughout; Tauri only converts command *argument* names.
 use serde::{Deserialize, Serialize};
 
-use crate::event::SessionStatus;
+use crate::event::{Event, SessionStatus};
+use crate::summary::Summary;
 
 /// Whether state-changing tools need the user's approval.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,6 +56,38 @@ pub struct TurnFinishedDto {
     pub status: SessionStatus,
     /// Redacted, user-presentable error text (for `llm_error` and `internal_error`).
     pub error: Option<String>,
+}
+
+/// What the settings screen shows. The API key itself never appears here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SettingsDto {
+    pub model: String,
+    pub default_model: String,
+    pub known_models: Vec<String>,
+    pub permission_mode: PermissionMode,
+    pub recent_workspaces: Vec<String>,
+    pub last_workspace: Option<String>,
+    pub key_present: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SaveSettingsDto {
+    pub model: String,
+    pub permission_mode: PermissionMode,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogIssuesDto {
+    pub truncated_last_line: bool,
+    pub bad_lines: Vec<usize>,
+}
+
+/// A recorded session for the history view.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoadedSessionDto {
+    pub summary: Summary,
+    pub events: Vec<Event>,
+    pub log_issues: LogIssuesDto,
 }
 
 #[cfg(test)]

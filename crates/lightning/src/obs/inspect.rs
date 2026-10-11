@@ -12,6 +12,7 @@ use super::event::{Event, EventKind, Outcome, preview};
 use super::jsonl::{ReadReport, read_events};
 use super::summary::Summary;
 use super::{SessionDir, SessionStatus};
+use lightning_protocol::dto::{LoadedSessionDto, LogIssuesDto};
 
 /// One session as loaded from disk.
 pub struct LoadedSession {
@@ -35,6 +36,42 @@ pub fn session_ids(home: &Path) -> io::Result<Vec<String>> {
     ids.sort();
     ids.reverse();
     Ok(ids)
+}
+
+/// Session ids look like `20261010T120000Z-a1b2`. Anything else is rejected before it
+/// is used to build a path, so a caller cannot reach outside the sessions folder.
+pub fn is_valid_session_id(id: &str) -> bool {
+    let b = id.as_bytes();
+    b.len() == 21
+        && b[..8].iter().all(u8::is_ascii_digit)
+        && b[8] == b'T'
+        && b[9..15].iter().all(u8::is_ascii_digit)
+        && b[15] == b'Z'
+        && b[16] == b'-'
+        && b[17..].iter().all(|c| c.is_ascii_digit() || c.is_ascii_lowercase())
+}
+
+/// Loads one session by exact id for the GUI.
+pub fn load_session_dto(home: &Path, id: &str) -> io::Result<LoadedSessionDto> {
+    if !is_valid_session_id(id) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a valid session id"));
+    }
+    let s = load_session(home, id)?;
+    Ok(LoadedSessionDto {
+        summary: s.summary,
+        events: s.events,
+        log_issues: LogIssuesDto { truncated_last_line: s.report.truncated_last_line, bad_lines: s.report.bad_lines },
+    })
+}
+
+/// Events with `seq > after_seq`, for a UI that missed some.
+pub fn events_after(home: &Path, id: &str, after_seq: u64) -> io::Result<Vec<Event>> {
+    if !is_valid_session_id(id) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a valid session id"));
+    }
+    let dir = SessionDir::open(home, id)?;
+    let (events, _) = read_events(&dir.events_path())?;
+    Ok(events.into_iter().filter(|e| e.seq > after_seq).collect())
 }
 
 /// Resolves `latest`, a full id, or a unique id prefix.
@@ -410,6 +447,29 @@ Ended: completed
         assert!(text.contains("unfinished"));
         assert!(text.contains("completed"));
         assert_eq!(render_list(&[]), "No sessions recorded yet.\n");
+        fs::remove_dir_all(home).ok();
+    }
+
+    #[test]
+    fn session_ids_are_validated_and_gui_loaders_refuse_bad_ones() {
+        assert!(is_valid_session_id("20261010T120000Z-a1b2"));
+        for bad in ["", "latest", "../x", "..\\x", "20261010T120000Z-A1B2", "20261010T120000Z-a1b", "20261010T120000Z-a1b2/..", "x0261010T120000Z-a1b2"] {
+            assert!(!is_valid_session_id(bad), "{bad}");
+        }
+        let home = temp_home();
+        assert!(load_session_dto(&home, "../../etc").is_err());
+        assert!(events_after(&home, "../x", 0).is_err());
+    }
+
+    #[test]
+    fn events_after_filters_by_seq_and_dto_carries_log_issues() {
+        let home = temp_home();
+        write_session(&home, "20261010T100000Z-aaaa", &fixture(), true);
+        let tail = events_after(&home, "20261010T100000Z-aaaa", 12).unwrap();
+        assert_eq!(tail.iter().map(|e| e.seq).collect::<Vec<_>>(), vec![13, 14]);
+        let dto = load_session_dto(&home, "20261010T100000Z-aaaa").unwrap();
+        assert_eq!(dto.events.len(), 14);
+        assert!(!dto.log_issues.truncated_last_line);
         fs::remove_dir_all(home).ok();
     }
 

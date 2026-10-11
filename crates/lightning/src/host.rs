@@ -188,6 +188,7 @@ pub struct SessionHost<L: LlmClient + Send + Sync + 'static> {
     make_llm: LlmFactory<L>,
     rt: tokio::runtime::Handle,
     broker: Arc<ApprovalBroker>,
+    secrets: Mutex<Vec<String>>,
     active: Mutex<Option<Active<L>>>,
 }
 
@@ -201,12 +202,18 @@ impl<L: LlmClient + Send + Sync + 'static> SessionHost<L> {
     ) -> Self {
         SessionHost {
             emitter,
-            config,
             make_llm: Arc::new(make_llm),
             rt,
             broker: Arc::new(ApprovalBroker::default()),
+            secrets: Mutex::new(config.api_key.iter().cloned().collect()),
+            config,
             active: Mutex::new(None),
         }
+    }
+
+    /// Replaces the secrets redacted from logs and events (call when the API key changes).
+    pub fn set_secrets(&self, secrets: Vec<String>) {
+        *self.secrets.lock().unwrap_or_else(|e| e.into_inner()) = secrets;
     }
 
     /// Creates a session and its log folder. The `session_started` event reaches the
@@ -239,7 +246,7 @@ impl<L: LlmClient + Send + Sync + 'static> SessionHost<L> {
         let last_seq = Arc::new(AtomicU64::new(0));
         let sinks: Vec<Box<dyn EventSink>> =
             vec![Box::new(jsonl), Box::new(EmitterSink { emitter: self.emitter.clone(), last_seq: last_seq.clone() })];
-        let redactor = Redactor::new(self.config.api_key.iter().cloned());
+        let redactor = Redactor::new(self.secrets.lock().unwrap_or_else(|e| e.into_inner()).clone());
         let rec = Recorder::new(id.clone(), redactor.clone(), sinks);
 
         let prompter = Arc::new(BrokerPrompter {
