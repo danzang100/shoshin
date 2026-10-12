@@ -540,7 +540,7 @@ mod tests {
         assert_eq!(reqs.len(), 3);
         assert_eq!(reqs[2].turns.len(), 5);
         assert!(reqs[0].system.contains("workspace"));
-        assert_eq!(reqs[0].tools.len(), 3);
+        assert_eq!(reqs[0].tools.len(), 5);
 
         let events = h.sink.events();
         assert_eq!(count(&events, "step_started"), 3);

@@ -3,9 +3,11 @@ use serde::Serialize;
 pub mod dispatch;
 pub mod error;
 pub mod gate;
+pub mod grep;
 pub mod list_dir;
 pub mod read_file;
 pub mod registry;
+pub mod run_shell;
 pub mod workspace;
 pub mod write_file;
 

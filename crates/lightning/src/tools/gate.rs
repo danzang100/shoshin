@@ -81,8 +81,15 @@ fn describe(name: &str, args: &Value) -> String {
             let bytes = args["content"].as_str().map(str::len).unwrap_or(0);
             format!("write {path} ({bytes} bytes)")
         }
+        "run_shell" => format!("run the command: {}", preview(args["command"].as_str().unwrap_or("?"), 300)),
         _ => preview(&args.to_string(), 200),
     }
+}
+
+/// Test hook for the approval wording.
+#[cfg(test)]
+pub(crate) fn describe_for_test(name: &str, args: &Value) -> String {
+    describe(name, args)
 }
 
 #[cfg(test)]

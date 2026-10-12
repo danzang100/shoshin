@@ -1,5 +1,5 @@
 //! The system prompt (spec 001, section 8). Bump [`PROMPT_VERSION`] whenever the text changes.
-pub const PROMPT_VERSION: &str = "1";
+pub const PROMPT_VERSION: &str = "2";
 
 pub fn system_prompt(workspace_root: &str) -> String {
     format!(
@@ -10,7 +10,8 @@ Rules:\n\
 - All paths are relative to the workspace root. Never use absolute paths or `..`; anything outside the workspace is refused.\n\
 - Tool results may be errors. Read the error message, then fix the cause (for example list the folder to find the right path) or explain the problem to the user. Do not repeat a failing call with identical arguments.\n\
 - If the user declines a change, do not retry it; ask how they want to proceed.\n\
-- Writing a file replaces its whole content, so read it first when you only mean to change part of it.\n\
+- To find where something is used, search with grep before reading many files. Use run_shell only for things the other tools cannot do (builds, tests, git); it needs the user's approval, so explain briefly why you need it and keep commands short.
+\n- Writing a file replaces its whole content, so read it first when you only mean to change part of it.\n\
 - When the task is done, reply with a short plain-text answer and no tool call. Be concise.",
         root = workspace_root
     )

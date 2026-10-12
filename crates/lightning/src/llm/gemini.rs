@@ -425,7 +425,7 @@ mod tests {
         let body = build_request("m", &r).unwrap();
         assert_eq!(body["generation_config"]["max_output_tokens"], 256);
         let tools = body["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 3);
+        assert_eq!(tools.len(), 5);
         let text = serde_json::to_string(tools).unwrap();
         assert!(!text.contains("$schema"));
         assert!(!text.contains("\"title\""));

@@ -111,7 +111,8 @@ impl Workspace {
     }
 }
 
-fn is_protected_name(name: &str) -> bool {
+/// Names the file tools never touch: `.env`, `.env.*` (except examples) and `.lightning`.
+pub fn is_protected_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     if lower == ".lightning" || lower == ".env" {
         return true;

@@ -7,7 +7,9 @@ use strum::IntoEnumIterator;
 use strum::IntoStaticStr;
 use strum::{EnumIter, EnumString};
 
+use crate::tools::grep::{self, GrepArgs};
 use crate::tools::list_dir::ListDirArgs;
+use crate::tools::run_shell::RunShellArgs;
 use crate::tools::read_file;
 use crate::tools::list_dir;
 use crate::tools::read_file::ReadFileArgs;
@@ -22,6 +24,9 @@ pub enum ToolCall {
     ReadFile(read_file::ReadFileArgs),
     ListDir(list_dir::ListDirArgs),
     WriteFile(write_file::WriteFileArgs),
+    Grep(grep::GrepArgs),
+    /// Runs asynchronously through `dispatch`; `execute` cannot run it.
+    RunShell(RunShellArgs),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, EnumString, IntoStaticStr)]
@@ -30,6 +35,8 @@ pub enum ToolKind {
     ReadFile,
     ListDir,
     WriteFile,
+    Grep,
+    RunShell,
 }
 
 impl ToolKind {
@@ -41,8 +48,8 @@ impl ToolKind {
     /// Tools that change state and therefore pass through the permission gate.
     pub fn needs_approval(&self) -> bool {
         match self {
-            ToolKind::ReadFile | ToolKind::ListDir => false,
-            ToolKind::WriteFile => true,
+            ToolKind::ReadFile | ToolKind::ListDir | ToolKind::Grep => false,
+            ToolKind::WriteFile | ToolKind::RunShell => true,
         }
     }
 
@@ -55,6 +62,8 @@ impl ToolKind {
                 spec_for::<ListDirArgs>(self.into())
             }
             ToolKind::WriteFile => spec_for::<WriteFileArgs>(self.into()),
+            ToolKind::Grep => spec_for::<GrepArgs>(self.into()),
+            ToolKind::RunShell => spec_for::<RunShellArgs>(self.into()),
         }
     }
 }
@@ -92,6 +101,10 @@ pub fn execute(ws:&workspace::Workspace, call: ToolCall) -> Result<ToolOutput, T
             list_dir(ws, args)
         }
         ToolCall::WriteFile(args) => write_file::write_file(ws, args),
+        ToolCall::Grep(args) => grep::grep(ws, args),
+        ToolCall::RunShell(_) => Err(ToolError::InvalidArguments {
+            message: "run_shell runs through the async dispatcher".into(),
+        }),
     }
 }
 
@@ -122,5 +135,7 @@ mod tests {
         assert!(!ToolKind::ReadFile.needs_approval());
         assert!(!ToolKind::ListDir.needs_approval());
         assert!(ToolKind::WriteFile.needs_approval());
+        assert!(ToolKind::RunShell.needs_approval());
+        assert!(!ToolKind::Grep.needs_approval());
     }
 }

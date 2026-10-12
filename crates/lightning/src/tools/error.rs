@@ -10,8 +10,11 @@ pub enum ToolError {
     /// Inside the workspace but off limits (secrets, harness logs).
     Blocked{path: String},
     InvalidArguments{message: String},
-    //ExecutionFailed{command: String, exit_code: i32, stderr: String},
-    //Timeout{command: String, duration: i32},
+    /// A shell command exited with a nonzero code; `output` is what it printed.
+    ExecutionFailed{exit_code: i32, output: String},
+    /// A shell command was killed after `seconds`; `output` is what it printed so far.
+    Timeout{seconds: u64, output: String},
+    Cancelled,
     Io{message: String},
     Other(io::Error),
 }
@@ -27,6 +30,9 @@ impl ToolError {
             ToolError::Blocked { .. } => ErrorClass::PermissionDenied,
             ToolError::InvalidArguments { .. } => ErrorClass::InvalidArguments,
             ToolError::Io { .. } => ErrorClass::Io,
+            ToolError::ExecutionFailed { .. } => ErrorClass::ExecutionFailed,
+            ToolError::Timeout { .. } => ErrorClass::Timeout,
+            ToolError::Cancelled => ErrorClass::Internal,
             ToolError::Other(err) => match err.kind() {
                 io::ErrorKind::NotFound => ErrorClass::NotFound,
                 io::ErrorKind::PermissionDenied => ErrorClass::PermissionDenied,
@@ -62,6 +68,24 @@ impl fmt::Display for ToolError {
             ToolError::Blocked { path } => {
                 write!(f, "Access to {path} is blocked because it may hold secrets or harness logs. Do not try to read or change it.")
             }
+            ToolError::ExecutionFailed { exit_code, output } => {
+                write!(f, "The command exited with code {exit_code}.")?;
+                if !output.is_empty() {
+                    write!(f, "
+{output}")?;
+                }
+                Ok(())
+            }
+            ToolError::Timeout { seconds, output } => {
+                write!(f, "The command did not finish within {seconds} seconds and was killed.")?;
+                if !output.is_empty() {
+                    write!(f, "
+Output so far:
+{output}")?;
+                }
+                Ok(())
+            }
+            ToolError::Cancelled => write!(f, "Cancelled by the user."),
             ToolError::Io { message } => {
                 write!(f, "I/O error occurred: {message}")
             }
@@ -92,6 +116,9 @@ mod tests {
         );
         assert_eq!(ToolError::Io { message: "m".into() }.class(), ErrorClass::Io);
         assert_eq!(ToolError::Blocked { path: ".env".into() }.class(), ErrorClass::PermissionDenied);
+        assert_eq!(ToolError::ExecutionFailed { exit_code: 2, output: String::new() }.class(), ErrorClass::ExecutionFailed);
+        assert_eq!(ToolError::Timeout { seconds: 5, output: String::new() }.class(), ErrorClass::Timeout);
+        assert_eq!(ToolError::Cancelled.class(), ErrorClass::Internal);
         assert_eq!(
             ToolError::from(io::Error::from(io::ErrorKind::PermissionDenied)).class(),
             ErrorClass::PermissionDenied

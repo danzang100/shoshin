@@ -10,6 +10,7 @@ use crate::cancel::CancelToken;
 use crate::obs::{EventKind, Outcome, Recorder, preview};
 use crate::tools::gate::{Decision, Gate};
 use crate::tools::registry::{self, ToolCall, ToolKind, ToolSpec};
+use crate::tools::run_shell::run_shell;
 use crate::tools::workspace::Workspace;
 use crate::tools::{ToolError, ToolOutput};
 use crate::turn::{ErrorClass, ToolOutcome, ToolResult, ToolUse};
@@ -134,6 +135,13 @@ impl Dispatcher {
             };
         }
 
+        // The shell is the one async tool: it must be able to kill its process.
+        if let ToolCall::RunShell(args) = call {
+            return match run_shell(&self.workspace, args, self.limits.timeout, cancel).await {
+                Ok(output) => output.into(),
+                Err(err) => err.into(),
+            };
+        }
         let ws = self.workspace.clone();
         guarded(move || registry::execute(&ws, call), self.limits.timeout, cancel).await
     }
@@ -416,5 +424,53 @@ mod tests {
         .await;
         assert!(started.elapsed() < Duration::from_millis(400));
         assert!(matches!(out, ToolOutcome::Error { class: ErrorClass::Internal, ref message } if message.contains("Cancelled")));
+    }
+
+    #[tokio::test]
+    async fn grep_runs_without_approval_and_reports_matches() {
+        let (d, rec, sink, dir) = setup(PermissionMode::Ask, false, ToolLimits::default());
+        fs::write(dir.join("a.txt"), "alpha
+needle here
+").unwrap();
+        let r = d.dispatch(&rec, None, &tu("grep", json!({ "pattern": "needle" })), &CancelToken::default()).await;
+        assert!(matches!(&r.outcome, ToolOutcome::Ok { content, .. } if content == "a.txt:2: needle here"));
+        assert!(sink.events().iter().any(|e| matches!(&e.kind, EventKind::GateDecision { allowed: true, reason, .. } if reason == "read-only tool")));
+        let bad = d.dispatch(&rec, None, &tu("grep", json!({ "pattern": "(" })), &CancelToken::default()).await;
+        assert_eq!(error_class(&bad), ErrorClass::InvalidArguments);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
+    async fn run_shell_is_gated_and_reports_success_failure_and_timeout() {
+        // Denied unless the user (or mode) allows it.
+        let (d, rec, _s, dir) = setup(PermissionMode::Ask, false, ToolLimits::default());
+        let denied = d.dispatch(&rec, None, &tu("run_shell", json!({ "command": "echo hi" })), &CancelToken::default()).await;
+        assert_eq!(error_class(&denied), ErrorClass::Denied);
+        fs::remove_dir_all(dir).ok();
+
+        let limits = ToolLimits { timeout: Duration::from_secs(1), ..ToolLimits::default() };
+        let (d, rec, sink, dir) = setup(PermissionMode::Allow, true, limits);
+        let ok = d.dispatch(&rec, None, &tu("run_shell", json!({ "command": "echo hi" })), &CancelToken::default()).await;
+        assert!(matches!(&ok.outcome, ToolOutcome::Ok { content, .. } if content == "hi"), "{:?}", ok.outcome);
+
+        let script = if cfg!(windows) { "Write-Output oops; exit 4" } else { "echo oops; exit 4" };
+        let failed = d.dispatch(&rec, None, &tu("run_shell", json!({ "command": script })), &CancelToken::default()).await;
+        assert_eq!(error_class(&failed), ErrorClass::ExecutionFailed);
+        assert!(matches!(&failed.outcome, ToolOutcome::Error { message, .. } if message.contains("code 4") && message.contains("oops")));
+
+        let slow = d.dispatch(&rec, None, &tu("run_shell", json!({ "command": "sleep 20" })), &CancelToken::default()).await;
+        assert_eq!(error_class(&slow), ErrorClass::Timeout);
+
+        let finished = sink.events().into_iter().filter(|e| matches!(e.kind, EventKind::ToolFinished { .. })).count();
+        assert_eq!(finished, 3);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
+    async fn the_shell_approval_prompt_shows_the_command() {
+        let req = crate::tools::gate::ApprovalRequest { tool: "run_shell".into(), summary: String::new() };
+        let _ = req;
+        let summary = crate::tools::gate::describe_for_test("run_shell", &json!({ "command": "cargo test" }));
+        assert_eq!(summary, "run the command: cargo test");
     }
 }
