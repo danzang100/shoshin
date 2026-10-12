@@ -2,6 +2,8 @@ mod api;
 mod app;
 mod components;
 mod fmt;
+mod markdown;
+mod md_view;
 mod mock;
 mod selftest;
 mod state;

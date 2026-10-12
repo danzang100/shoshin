@@ -191,7 +191,9 @@ fn delay_for(kind: &EventKind) -> u32 {
 fn pick_scenario(text: &str) -> Vec<Event> {
     let t = text.to_lowercase();
     let first = !with(|m| std::mem::replace(&mut m.started, true));
-    let mut events = if t.contains("retry") || t.contains("rate") {
+    let mut events = if t.contains("markdown") || t.contains("format") {
+        fixtures::markdown_answer()
+    } else if t.contains("retry") || t.contains("rate") {
         fixtures::retry_then_ok()
     } else if t.contains("write") || t.contains("create") {
         fixtures::approval_allowed()

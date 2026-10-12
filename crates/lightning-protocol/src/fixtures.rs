@@ -237,6 +237,54 @@ pub fn approval_allowed() -> Vec<Event> {
     s.build()
 }
 
+/// One answer that uses most Markdown features, for the renderer and the browser mock.
+pub fn markdown_answer() -> Vec<Event> {
+    let mut s = Stream::new();
+    started(&mut s);
+    s.push(1, EventKind::UserMessage { text: "Show me some formatting".into() });
+    s.push(1, EventKind::StepStarted { step: 1 });
+    answer(&mut s, 1, MARKDOWN_SAMPLE);
+    ended(&mut s, SessionStatus::Completed, 1, 0, 0);
+    s.build()
+}
+
+pub const MARKDOWN_SAMPLE: &str = "# Project overview
+
+This crate has **three** parts, with *some* detail in `Cargo.toml` and ~~one old note~~.
+
+## What it does
+
+- reads files
+- lists folders
+  - including hidden ones
+- writes files after you approve
+
+1. Run `cargo build`
+2. Run `cargo test`
+
+- [x] tests pass
+- [ ] docs written
+
+```rust
+fn main() {
+    println!(\"hello <b>world</b>\");
+}
+```
+
+| Tool | Needs approval |
+|:-----|:--------------:|
+| read_file | no |
+| write_file | yes |
+
+> Note: paths are relative to the workspace.
+
+See [the docs](https://example.com/docs) or [a bad link](javascript:alert(1)).
+
+---
+
+<script>alert(1)</script>
+Last line.";
+
 /// A rate-limited call that succeeds on retry.
 pub fn retry_then_ok() -> Vec<Event> {
     let mut s = Stream::new();

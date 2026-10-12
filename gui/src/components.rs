@@ -8,6 +8,7 @@ use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 use yew::prelude::*;
 
 use crate::fmt;
+use crate::md_view::Markdown;
 use crate::state::{Banner, BannerKind, HistoryView};
 
 // ---------------------------------------------------------------- timeline
@@ -50,7 +51,7 @@ struct ItemProps {
 fn item_view(props: &ItemProps) -> Html {
     match &props.item.body {
         ItemBody::User { text } => html! { <div class="msg user"><div class="bubble">{ text }</div></div> },
-        ItemBody::Assistant { text } => html! { <div class="msg assistant"><div class="bubble">{ text }</div></div> },
+        ItemBody::Assistant { text } => html! { <div class="msg assistant"><div class="bubble md-bubble"><Markdown source={text.clone()} /></div></div> },
         ItemBody::Tool(tool) => html! { <ToolCard tool={tool.clone()} /> },
         ItemBody::Notice { level, text } => {
             let class = match level {
