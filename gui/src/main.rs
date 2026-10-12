@@ -3,6 +3,7 @@ mod app;
 mod components;
 mod fmt;
 mod mock;
+mod selftest;
 mod state;
 
 fn main() {

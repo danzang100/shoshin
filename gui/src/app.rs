@@ -13,6 +13,7 @@ use crate::components::{
     ApprovalModal, BannerView, Composer, HistoryBar, SettingsPanel, Sidebar, StatusBar, Timeline,
 };
 use crate::fmt;
+use crate::selftest::{self, Latest};
 use crate::state::{Action, AppState};
 
 type Dispatcher = UseReducerDispatcher<AppState>;
@@ -48,10 +49,19 @@ async fn startup(d: Dispatcher) {
 #[function_component(App)]
 pub fn app() -> Html {
     let state = use_reducer(AppState::default);
+    // For the opt-in self-test driver only: the newest state and callbacks, kept outside
+    // the render snapshot so async code never sees stale values.
+    let selftest_active = use_mut_ref(|| false);
+    let mirror = use_mut_ref(AppState::default);
+    let latest = use_mut_ref(|| None::<Latest>);
+    if *selftest_active.borrow() {
+        *mirror.borrow_mut() = (*state).clone();
+    }
 
     // Subscribe to backend events once, and load settings and history.
     {
         let dispatcher = state.dispatcher();
+        let (selftest_active, mirror, latest) = (selftest_active.clone(), mirror.clone(), latest.clone());
         use_effect_with((), move |_| {
             let holder: Rc<RefCell<Option<api::Subscription>>> = Rc::new(RefCell::new(None));
             let slot = holder.clone();
@@ -66,7 +76,16 @@ pub fn app() -> Html {
                 let sub = api::subscribe(handlers).await;
                 *slot.borrow_mut() = Some(sub);
             });
-            spawn_local(startup(dispatcher));
+            let driver = dispatcher.clone();
+            spawn_local(async move {
+                // Decide first, so the mirror tracks state from the very first change.
+                let plan = selftest::fetch_plan().await;
+                *selftest_active.borrow_mut() = plan.is_some();
+                startup(dispatcher).await;
+                if let Some(plan) = plan {
+                    selftest::run(plan, mirror, latest, driver).await;
+                }
+            });
             move || {
                 holder.borrow_mut().take();
             }
@@ -244,6 +263,13 @@ pub fn app() -> Html {
         let d = state.dispatcher();
         Callback::from(move |_: ()| d.dispatch(Action::DismissBanner))
     };
+
+    *latest.borrow_mut() = Some(Latest {
+        on_send: on_send.clone(),
+        on_answer: on_answer.clone(),
+        on_stop: on_stop.clone(),
+        on_new: on_new.clone(),
+    });
 
     let st = &*state;
     let (model, read_only, last_status) = match (&st.history, &st.live) {

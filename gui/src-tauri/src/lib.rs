@@ -163,12 +163,42 @@ fn session_events(workspace: String, session_id: String, after_seq: u64) -> Resu
     logic::session_events(&workspace, &session_id, after_seq)
 }
 
+/// End-to-end test hooks. They do nothing unless `LIGHTNING_GUI_SELFTEST` names a plan file.
+fn selftest_enabled() -> bool {
+    std::env::var_os("LIGHTNING_GUI_SELFTEST").is_some()
+}
+
+#[tauri::command]
+fn selftest_plan() -> Option<serde_json::Value> {
+    let path = std::env::var("LIGHTNING_GUI_SELFTEST").ok()?;
+    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+}
+
+#[tauri::command]
+fn selftest_report(line: String) {
+    if selftest_enabled() {
+        println!("SELFTEST {line}");
+    }
+}
+
+#[tauri::command]
+fn selftest_done(app: AppHandle, code: i32) {
+    if selftest_enabled() {
+        app.exit(code);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let settings_path = app.path().app_data_dir()?.join("settings.json");
+            // LIGHTNING_GUI_DATA_DIR lets dev and test runs keep their settings apart from the real ones.
+            let data_dir = match std::env::var_os("LIGHTNING_GUI_DATA_DIR") {
+                Some(dir) => PathBuf::from(dir),
+                None => app.path().app_data_dir()?,
+            };
+            let settings_path = data_dir.join("settings.json");
             let keys: Arc<dyn KeyStore> = Arc::new(CredentialStore);
             let stored = StoredSettings::load(&settings_path);
 
@@ -201,6 +231,9 @@ pub fn run() {
             list_sessions,
             load_session,
             session_events,
+            selftest_plan,
+            selftest_report,
+            selftest_done,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

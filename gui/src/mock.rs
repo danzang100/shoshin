@@ -145,7 +145,7 @@ pub fn load_session(id: &str) -> Result<LoadedSessionDto, String> {
     Ok(LoadedSessionDto { summary: Summary::from_events(id, &events), events, log_issues: issues })
 }
 
-async fn sleep_ms(ms: u32) {
+pub(crate) async fn sleep_ms(ms: u32) {
     let promise = js_sys::Promise::new(&mut |resolve, _| {
         let global = js_sys::global();
         if let Ok(set_timeout) = js_sys::Reflect::get(&global, &JsValue::from_str("setTimeout")) {
