@@ -7,6 +7,8 @@ use clap::{Parser, Subcommand};
 use crate::adapter::claude_code::ClaudeCode;
 use crate::ingest;
 use crate::paths;
+use crate::pricing::PriceTable;
+use crate::report;
 use crate::store::Store;
 
 #[derive(Parser, Debug)]
@@ -72,8 +74,14 @@ pub fn run<W: Write>(cli: Cli, out: &mut W) -> Result<()> {
             }
             Ok(())
         }
-        Command::Report { .. } => {
-            writeln!(out, "report: not implemented")?;
+        Command::Report { since, by, format, exclude_subagents, include_synthetic, pricing } => {
+            let by = report::GroupBy::parse(&by)?;
+            let format = report::Format::parse(&format)?;
+            let since = since.map(|s| report::parse_since(&s, chrono::Utc::now())).transpose()?;
+            let pricing = PriceTable::load(Some(&pricing.unwrap_or_else(paths::default_pricing_override)))?;
+            let store = Store::open(&db)?;
+            let opts = report::ReportOptions { since, by, include_subagents: !exclude_subagents, include_synthetic };
+            write!(out, "{}", report::build(&store, &pricing, &opts)?.render(format)?)?;
             Ok(())
         }
         Command::Doctor { .. } => {
