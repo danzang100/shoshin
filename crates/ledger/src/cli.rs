@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
 use crate::adapter::claude_code::ClaudeCode;
+use crate::doctor;
 use crate::ingest;
 use crate::paths;
 use crate::pricing::PriceTable;
@@ -51,6 +52,8 @@ pub enum Command {
     Doctor {
         #[arg(long)]
         pricing: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -84,8 +87,15 @@ pub fn run<W: Write>(cli: Cli, out: &mut W) -> Result<()> {
             write!(out, "{}", report::build(&store, &pricing, &opts)?.render(format)?)?;
             Ok(())
         }
-        Command::Doctor { .. } => {
-            writeln!(out, "doctor: not implemented")?;
+        Command::Doctor { pricing, json } => {
+            let pricing = PriceTable::load(Some(&pricing.unwrap_or_else(paths::default_pricing_override)))?;
+            let store = Store::open(&db)?;
+            let rep = doctor::build(&store, &pricing, chrono::Utc::now())?;
+            if json {
+                writeln!(out, "{}", serde_json::to_string_pretty(&rep)?)?;
+            } else {
+                write!(out, "{}", rep.render())?;
+            }
             Ok(())
         }
     }

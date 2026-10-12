@@ -1,6 +1,7 @@
 //! Model Ledger: normalize coding-agent transcripts and report per-model cost and reliability.
 pub mod adapter;
 pub mod cli;
+pub mod doctor;
 pub mod ingest;
 pub mod paths;
 pub mod pricing;
