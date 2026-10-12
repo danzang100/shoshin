@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/lightning", "crates/lightning-protocol", "gui", "gui/src-tauri"]
-default-members = ["crates/lightning", "crates/lightning-protocol"]
+members = ["crates/lightning", "crates/lightning-protocol", "crates/ledger", "gui", "gui/src-tauri"]
+default-members = ["crates/lightning", "crates/lightning-protocol", "crates/ledger"]
 resolver = "3"
 
 [profile.release]
