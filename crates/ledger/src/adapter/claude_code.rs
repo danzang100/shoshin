@@ -300,10 +300,10 @@ pub fn parse_reader<R: BufRead>(mut reader: R, file: &DiscoveredFile, hasher: &H
             accs.len() - 1
         });
         let acc = &mut accs[idx];
-        if acc.turn.model.is_empty() {
-            if let Some(m) = str_of(msg, "model") {
-                acc.turn.model = m.to_string();
-            }
+        if acc.turn.model.is_empty()
+            && let Some(m) = str_of(msg, "model")
+        {
+            acc.turn.model = m.to_string();
         }
         acc.turn.is_api_error |= line.get("isApiErrorMessage").and_then(Value::as_bool) == Some(true);
         acc.turn.is_aborted |= line.get("isAbortedMidStream").and_then(Value::as_bool) == Some(true);
@@ -528,7 +528,7 @@ mod tests {
             agent_id: None,
         };
         for cut in (0..text.len()).filter(|i| text.is_char_boundary(*i)) {
-            parse_reader(text[..cut].as_bytes(), &f, &Hasher::new("s")).unwrap();
+            parse_reader(&text.as_bytes()[..cut], &f, &Hasher::new("s")).unwrap();
         }
     }
 }
