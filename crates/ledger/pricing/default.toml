@@ -1,0 +1,26 @@
+# Shipped price table. Prices are intentionally NOT filled in: copy this file to
+# <data dir>/ledger/pricing.toml (or pass --pricing) and fill the numbers from the
+# provider's pricing page. A model whose needed prices are missing is reported as `unpriced`.
+version = "2026-10-12"
+currency = "USD"
+
+[[model]]
+id = "claude-opus-5"
+match = "exact"
+# input_per_mtok = 0.0
+# output_per_mtok = 0.0
+# cache_read_per_mtok = 0.0
+# cache_write_5m_per_mtok = 0.0
+# cache_write_1h_per_mtok = 0.0
+
+[[model]]
+id = "claude-opus-5-5"
+match = "exact"
+
+[[model]]
+id = "claude-sonnet-5"
+match = "exact"
+
+[[model]]
+id = "claude-sonnet-5-5"
+match = "exact"

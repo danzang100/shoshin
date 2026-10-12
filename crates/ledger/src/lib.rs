@@ -3,6 +3,7 @@ pub mod adapter;
 pub mod cli;
 pub mod ingest;
 pub mod paths;
+pub mod pricing;
 pub mod redact;
 pub mod schema;
 pub mod store;
