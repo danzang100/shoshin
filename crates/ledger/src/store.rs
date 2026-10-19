@@ -7,7 +7,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::redact::Hasher;
 use crate::schema::{ParsedFile, SCHEMA_VERSION};
 
-const DB_VERSION: i64 = 1;
+const DB_VERSION: i64 = 2;
 
 const MIGRATION_1: &str = "
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -96,6 +96,19 @@ CREATE TABLE unknown_types (
 );
 ";
 
+/// Version 1 built turn ids from the session id, so copies of a turn in resumed sessions were
+/// counted twice. The ids cannot be recomputed in SQL, so drop the derived rows and forget the
+/// file fingerprints; the next ingest rebuilds them. Rows whose transcript has since been
+/// deleted are lost.
+const MIGRATION_2: &str = "
+DELETE FROM tool_calls;
+DELETE FROM turns;
+DELETE FROM signals;
+DELETE FROM unknown_types;
+DELETE FROM sessions;
+DELETE FROM files;
+";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fingerprint {
     pub path: String,
@@ -138,6 +151,12 @@ impl Store {
                 params![SCHEMA_VERSION.to_string()],
             )?;
             tx.execute_batch("PRAGMA user_version = 1")?;
+            tx.commit()?;
+        }
+        if v < 2 {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(MIGRATION_2)?;
+            tx.execute_batch("PRAGMA user_version = 2")?;
             tx.commit()?;
         }
         let salt: String = conn.query_row("SELECT value FROM meta WHERE key = 'salt'", [], |r| r.get(0))?;

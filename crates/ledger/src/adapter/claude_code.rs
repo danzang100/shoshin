@@ -271,8 +271,11 @@ pub fn parse_reader<R: BufRead>(mut reader: R, file: &DiscoveredFile, hasher: &H
             out.stats.bad_lines += 1;
             continue;
         }
-        let idx = *acc_index.entry((agent_id.clone(), key.clone() + "|" + &session_id)).or_insert_with(|| {
-            let turn_id = hasher.hash(&format!("{session_id}|{agent_id}|{key}"));
+        // A turn is one API call. Resumed and forked sessions copy earlier calls into their own
+        // file under the new session id, so the id leaves the session out: the store keeps the
+        // first copy it sees and ignores the rest.
+        let idx = *acc_index.entry((agent_id.clone(), key.clone())).or_insert_with(|| {
+            let turn_id = hasher.hash(&format!("{agent_id}|{key}"));
             accs.push(TurnAcc {
                 turn: Turn {
                     turn_id,

@@ -71,7 +71,11 @@ pub fn ingest(store: &mut Store, adapter: &dyn Adapter, root: &Path) -> Result<I
         bail!("transcript root {} does not exist or is not a directory", root.display());
     }
     let mut s = IngestSummary::default();
-    for file in adapter.discover(root)? {
+    // Oldest first: a resumed session copies earlier turns into a newer file, and the store keeps
+    // the first copy of a turn, so this way the turn stays with the session that made it.
+    let mut files = adapter.discover(root)?;
+    files.sort_by_cached_key(|f| std::fs::metadata(&f.path).and_then(|m| m.modified()).ok());
+    for file in files {
         s.files_seen += 1;
         let fp = match fingerprint(&file, store) {
             Ok(fp) => fp,

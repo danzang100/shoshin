@@ -68,6 +68,65 @@ fn reingesting_a_changed_file_replaces_its_rows() {
 }
 
 #[test]
+fn resumed_session_copies_count_once_and_stay_with_the_original() {
+    let tmp = tempfile::tempdir().unwrap();
+    let proj = tmp.path().join("root/-p");
+    std::fs::create_dir_all(&proj).unwrap();
+    let line = |session: &str, id: &str, out: u32| {
+        format!(
+            "{{\"type\":\"assistant\",\"sessionId\":\"{session}\",\"uuid\":\"u-{id}\",\"requestId\":\"r-{id}\",\"timestamp\":\"2026-10-03T00:00:00Z\",\"message\":{{\"id\":\"{id}\",\"model\":\"m\",\"content\":[{{\"type\":\"tool_use\",\"id\":\"toolu_{id}\",\"name\":\"Bash\",\"input\":{{}}}}],\"usage\":{{\"input_tokens\":1,\"output_tokens\":{out}}}}}}}\n"
+        )
+    };
+    let orig_id = "44444444-4444-4444-8444-444444444444";
+    // Named so it sorts first by path: only the file age should decide ownership.
+    let resumed_id = "00000000-0000-4000-8000-000000000000";
+    let orig = proj.join(format!("{orig_id}.jsonl"));
+    let resumed = proj.join(format!("{resumed_id}.jsonl"));
+    std::fs::write(&orig, line(orig_id, "msg_a", 5) + &line(orig_id, "msg_b", 7)).unwrap();
+    // The resumed file repeats both calls under its own session id, then adds a new one.
+    std::fs::write(
+        &resumed,
+        line(resumed_id, "msg_a", 5) + &line(resumed_id, "msg_b", 7) + &line(resumed_id, "msg_c", 11),
+    )
+    .unwrap();
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    std::fs::File::options().write(true).open(&orig).unwrap().set_modified(old).unwrap();
+
+    let mut store = Store::open(&tmp.path().join("db/l.db")).unwrap();
+    let s = ingest(&mut store, &ClaudeCode, &tmp.path().join("root")).unwrap();
+    assert_eq!((s.turns, s.tool_calls), (3, 3));
+    let out_by = |session: &str| -> i64 {
+        store
+            .conn()
+            .query_row(
+                "SELECT COALESCE(SUM(output_tokens), 0) FROM turns WHERE session_id = ?1",
+                [session],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    assert_eq!(out_by(orig_id), 12, "copied turns belong to the session that made them");
+    assert_eq!(out_by(resumed_id), 11, "only the new turn belongs to the resumed session");
+}
+
+#[test]
+fn version_1_database_is_rebuilt() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("l.db");
+    {
+        let mut store = Store::open(&db).unwrap();
+        ingest(&mut store, &ClaudeCode, &fixtures()).unwrap();
+        store.conn().execute_batch("PRAGMA user_version = 1").unwrap();
+    }
+    let mut store = Store::open(&db).unwrap();
+    for t in ["turns", "tool_calls", "signals", "files", "sessions"] {
+        assert_eq!(store.count(t).unwrap(), 0, "{t} should be cleared");
+    }
+    let s = ingest(&mut store, &ClaudeCode, &fixtures()).unwrap();
+    assert_eq!((s.files_parsed, s.turns, s.tool_calls), (3, 10, 8));
+}
+
+#[test]
 fn no_raw_content_reaches_the_database_file() {
     let tmp = tempfile::tempdir().unwrap();
     let db = tmp.path().join("l.db");
