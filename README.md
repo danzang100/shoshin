@@ -4,13 +4,13 @@ Agentic coding harness completely built in Rust. In-built observability into eve
 
 ## Status
 
-Tools (`read_file`, `list_dir`, registry, workspace sandbox) -> working 
-CLI (interactive menu) -> working 
-Test suite -> not yet
-LLM client (local / OpenAI-compatible (most likely using LiteLLM)) -> not yet 
-GUI (Tauri) -> not yet 
-Orchestrator loop -> not yet
-Context management, permission gate, session store, telemetry -> not yet 
+1. Tools (`read_file`, `list_dir`, registry, workspace sandbox) -> working 
+2. CLI (interactive menu) -> working 
+3. Test suite -> not yet
+4. LLM client (local / OpenAI-compatible (most likely using LiteLLM)) -> not yet 
+5. GUI (Tauri) -> not yet 
+6. Orchestrator loop -> not yet
+7. Context management, permission gate, session store, telemetry -> not yet 
 
 ## Note
 
