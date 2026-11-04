@@ -1,7 +1,0 @@
-{
-  "name": "model-ledger-local",
-  "owner": { "name": "danzang100" },
-  "plugins": [
-    { "name": "model-ledger", "source": "./plugin", "description": "Local model usage ledger skills" }
-  ]
-}
